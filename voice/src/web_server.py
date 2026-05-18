@@ -3,7 +3,7 @@ import threading
 from flask import Flask, jsonify, render_template, request, send_file, url_for
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from const import AppState, BASE_DIR
+from const import BASE_DIR, AppState
 
 
 def make_web_server(state: AppState) -> Flask:

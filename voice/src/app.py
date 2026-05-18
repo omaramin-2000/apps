@@ -9,9 +9,9 @@ from typing import Dict
 from ruamel.yaml import YAML
 from wyoming.server import AsyncServer
 
-from hass_api import HomeAssistant
-from const import AppState, BASE_DIR, Tool, ToolIntent
+from const import BASE_DIR, AppState, Tool, ToolIntent
 from gemma4_recognizer import Gemma4Recognizer
+from hass_api import HomeAssistant
 from intent_server import Gemma4EventHandler
 from lang_intents import LanguageIntents
 from name_resolver import NameResolver
@@ -32,6 +32,10 @@ async def main() -> None:
     #
     parser.add_argument("--hass-token", required=True)
     parser.add_argument("--hass-api", default="http://homeassistant.local:8123")
+    #
+    parser.add_argument(
+        "--llama-state", required=True, help="Path to save llama.cpp state"
+    )
     #
     parser.add_argument(
         "--debug", action="store_true", help="Print DEBUG messages to console"
@@ -70,8 +74,8 @@ async def main() -> None:
         tools=tools,
     )
 
-    recognizer = Gemma4Recognizer()
-    recognizer.load()
+    recognizer = Gemma4Recognizer(state_path=args.llama_state)
+    recognizer.load([t.tool for t in tools.values()])
 
     lang_intents = LanguageIntents()
 

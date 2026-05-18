@@ -1,13 +1,14 @@
-import logging
-import time
-from typing import TYPE_CHECKING, Optional
+import hashlib
 import json
+import logging
+import pickle
 import re
-from typing import Any, Dict, List, Tuple
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
-if TYPE_CHECKING:
-    from llama_cpp import Llama
-
+from huggingface_hub import hf_hub_download
+from llama_cpp import Llama
 
 TOOL_CALL_RE = re.compile(
     r"<\|tool_call>call:([a-zA-Z0-9_]+)\{(.*?)\}<tool_call\|>",
@@ -17,7 +18,8 @@ TOOL_CALL_RE = re.compile(
 
 DEFAULT_REPO = "ggml-org/gemma-4-E2B-it-GGUF"
 DEFAULT_FILENAME = "gemma-4-E2B-it-Q8_0.gguf"
-DEFAULT_PROMPT = 'Call tools for this sentence: "{text}"'
+DEFAULT_SYSTEM_PROMPT = "Call tools for the following sentence."
+DEFAULT_USER_PROMPT = 'Sentence: "{text}"'
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,78 +27,110 @@ _LOGGER = logging.getLogger(__name__)
 class Gemma4Recognizer:
     def __init__(
         self,
+        state_path: Union[str, Path],
         repo_id: str = DEFAULT_REPO,
         filename: str = DEFAULT_FILENAME,
-        prompt: str = DEFAULT_PROMPT,
+        system_prompt: str = DEFAULT_SYSTEM_PROMPT,
+        user_prompt: str = DEFAULT_USER_PROMPT,
         debug: bool = False,
     ) -> None:
         self.llm: Optional[Llama] = None
+        self.state_path = Path(state_path)
         self.repo_id = repo_id
         self.filename = filename
-        self.prompt = prompt
+        self.user_prompt = user_prompt
         self.n_ctx = 2048
         self.max_tokens = 64
         self.temperature = 0.0
         self.top_p = 1.0
         self.enable_thinking = False
         self.tool_choice: str = "auto"
+        self.tools: Optional[List[Dict[str, Any]]] = None
         self.debug = debug
 
-    def load(self) -> None:
-        if self.llm:
-            # Already loaded
-            return
+        self.system_message = {
+            "role": "system",
+            "content": system_prompt,
+        }
 
-        from llama_cpp import Llama
-        from huggingface_hub import hf_hub_download
+    def load(self, tools: List[Dict[str, Any]]) -> None:
+        self.tools = tools
+        if self.llm is None:
+            try:
+                model_path = hf_hub_download(
+                    repo_id=self.repo_id,
+                    filename=self.filename,
+                    local_files_only=True,
+                )
+            except OSError:
+                model_path = hf_hub_download(
+                    repo_id=self.repo_id,
+                    filename=self.filename,
+                    local_files_only=False,
+                )
+            _LOGGER.debug("Loading gemma4: %s", model_path)
+            self.llm = Llama(
+                model_path=model_path,
+                chat_template_kwargs={"enable_thinking": self.enable_thinking},
+                n_ctx=self.n_ctx,
+                verbose=self.debug,
+            )
 
-        model_path = hf_hub_download(
-            repo_id=self.repo_id,
-            filename=self.filename,
-        )
-        _LOGGER.debug("Loading gemma4: %s", model_path)
-        self.llm = Llama(
-            model_path=model_path,
-            chat_template_kwargs={"enable_thinking": self.enable_thinking},
-            n_ctx=self.n_ctx,
-            verbose=self.debug,
-        )
+        actual_tools_hash = _get_tools_hash(tools)
+        state_metadata_path = self.state_path.with_suffix(".sha256")
+        rebuild_state = True
+        if state_metadata_path.exists() and self.state_path.exists():
+            expected_tools_hash = state_metadata_path.read_text(
+                encoding="utf-8"
+            ).strip()
+            if expected_tools_hash == actual_tools_hash:
+                _LOGGER.debug("Cache hit. Loading state: %s", self.state_path)
+                with open(self.state_path, "rb") as state_file:
+                    state = pickle.load(state_file)
 
-    def get_tool_calls(
-        self, text: str, tools: List[Dict[str, Any]]
-    ) -> List[Tuple[str, Dict[str, Any]]]:
+                self.llm.load_state(state)
+                rebuild_state = False
+
+        if rebuild_state:
+            _LOGGER.debug("Cache miss. Rebuilding state")
+            self.llm.create_chat_completion(
+                messages=[self.system_message],  # type: ignore
+                tools=self.tools,  # type: ignore
+                max_tokens=0,
+            )
+            _LOGGER.debug("Saving state: %s", self.state_path)
+            with open(self.state_path, "wb") as state_file:
+                state = self.llm.save_state()
+                pickle.dump(state, state_file)
+
+            state_metadata_path.write_text(actual_tools_hash, encoding="utf-8")
+
+    def get_tool_calls(self, text: str) -> List[Tuple[str, Dict[str, Any]]]:
         assert self.llm, "Not loaded"
 
         start_time = time.monotonic()
-        response = self.llm.create_chat_completion(
-            messages=[
-                {
-                    "role": "user",
-                    "content": self.prompt.format(text=text),
-                }
-            ],
-            tools=tools,
-            temperature=self.temperature,
-            top_p=self.top_p,
-            max_tokens=self.max_tokens,
-            tool_choice=self.tool_choice,
+        response = cast(
+            Dict[str, Any],
+            self.llm.create_chat_completion(
+                messages=[
+                    self.system_message,  # type: ignore
+                    {
+                        "role": "user",
+                        "content": self.user_prompt.format(text=text),
+                    },
+                ],
+                tools=self.tools,  # type: ignore
+                temperature=self.temperature,
+                top_p=self.top_p,
+                max_tokens=self.max_tokens,
+                tool_choice=self.tool_choice,  # type: ignore
+            ),
         )
         end_time = time.monotonic()
         _LOGGER.debug("Response in %s second(s): %s", end_time - start_time, response)
 
         content = response["choices"][0]["message"]["content"]
         return _parse_tool_calls(content)
-
-    @staticmethod
-    def is_available() -> bool:
-        try:
-            from llama_cpp import Llama
-            from huggingface_hub import hf_hub_download
-
-            return True
-
-        except ImportError:
-            return False
 
 
 # -----------------------------------------------------------------------------
@@ -187,3 +221,7 @@ def _split_args(raw_args: str) -> List[str]:
         parts.append(part)
 
     return parts
+
+
+def _get_tools_hash(tools: List[Dict[str, Any]]) -> str:
+    return hashlib.sha256(json.dumps(tools).encode()).hexdigest()

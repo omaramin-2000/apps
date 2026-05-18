@@ -1,28 +1,21 @@
-import time
 import logging
+import time
 from collections.abc import Mapping
-from typing import Optional, Any, Dict, Set, Tuple, Union, List
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-from hass_api import InfoForRecognition
-from models import Area, Floor
-from wyoming.error import Error
-from wyoming.event import Event
-from wyoming.server import AsyncEventHandler
-from wyoming.info import (
-    Attribution,
-    Describe,
-    Info,
-    IntentProgram,
-    IntentModel,
-)
-from wyoming.asr import Transcript
-from wyoming.intent import Intent, Entity, NotRecognized, IntentsStart, IntentsStop
 from jinja2 import BaseLoader
 from jinja2.nativetypes import NativeEnvironment
-from rapidfuzz import process, fuzz
+from rapidfuzz import fuzz, process
+from wyoming.asr import Transcript
+from wyoming.error import Error
+from wyoming.event import Event
+from wyoming.info import Attribution, Describe, Info, IntentModel, IntentProgram
+from wyoming.intent import Entity, Intent, IntentsStart, IntentsStop, NotRecognized
+from wyoming.server import AsyncEventHandler
 
 from const import AppState, Tool, ToolIntent
 from gemma4_recognizer import Gemma4Recognizer
+from hass_api import InfoForRecognition
 from lang_intents import LanguageIntents
 from name_resolver import NameResolver
 from util import normalize_name
@@ -106,8 +99,7 @@ class Gemma4EventHandler(AsyncEventHandler):
     async def _handle_transcript(
         self, transcript: Transcript, hass_info: InfoForRecognition
     ) -> None:
-        tools_list = [t.tool for t in self.state.tools.values()]
-        tool_calls = self.recognizer.get_tool_calls(transcript.text, tools_list)
+        tool_calls = self.recognizer.get_tool_calls(transcript.text)
         if not tool_calls:
             await self.write_event(
                 NotRecognized(

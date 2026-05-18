@@ -11,7 +11,7 @@ MULTILINGUAL_MODEL = "intfloat/multilingual-e5-small"
 
 
 class NameResolver:
-    def __init__(self, model_name=MULTILINGUAL_MODEL) -> None:
+    def __init__(self, model_name=EN_MODEL) -> None:
         self.model: Optional[SentenceTransformer] = None
         self.model_name = model_name
 
@@ -19,7 +19,10 @@ class NameResolver:
         if self.model:
             return
 
-        self.model = SentenceTransformer(self.model_name)
+        try:
+            self.model = SentenceTransformer(self.model_name, local_files_only=True)
+        except OSError:
+            self.model = SentenceTransformer(self.model_name, local_files_only=False)
 
     def best_candidate(
         self,

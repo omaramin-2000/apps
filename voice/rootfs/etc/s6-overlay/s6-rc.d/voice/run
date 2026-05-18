@@ -1,0 +1,16 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# Start voice service
+# ==============================================================================
+cd /usr/src
+
+flags=()
+
+if bashio::config.true 'debug_logging'; then
+    flags+=('--debug')
+fi
+
+exec python3 app.py \
+    --uri 'tcp://0.0.0.0:50051' \
+    ${flags[@]}

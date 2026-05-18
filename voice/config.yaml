@@ -1,0 +1,20 @@
+---
+version: 1.0.0
+slug: voice
+name: Voice
+description: Voice
+url: https://github.com/OHF-Voice/apps-experimental/tree/master/voice
+arch:
+  - amd64
+  - aarch64
+init: false
+discovery:
+  - wyoming
+homeassistant_api: false
+options:
+  debug_logging: false
+schema:
+  debug_logging: bool
+ports:
+  "50051/tcp": null
+homeassistant: 2023.11.0

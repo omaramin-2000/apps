@@ -14,12 +14,17 @@ TOOL_CALL_RE = re.compile(
     r"<\|tool_call>call:([a-zA-Z0-9_]+)\{(.*?)\}<tool_call\|>",
     re.DOTALL,
 )
+TOOL_ARGS = Dict[str, Any]
+TOOL_CALL = Tuple[str, TOOL_ARGS]
 
 
 DEFAULT_REPO = "ggml-org/gemma-4-E2B-it-GGUF"
 DEFAULT_FILENAME = "gemma-4-E2B-it-Q8_0.gguf"
-DEFAULT_SYSTEM_PROMPT = "Call tools for the following sentence."
-DEFAULT_USER_PROMPT = 'Sentence: "{text}"'
+DEFAULT_SYSTEM_PROMPT = """
+Call tools for the following sentence.
+If no tools are called, say you don't understand in the following language.
+"""
+DEFAULT_USER_PROMPT = 'Sentence: "{text}"\nLanguage: "{language}"'
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,6 +53,7 @@ class Gemma4Recognizer:
         self.tools: Optional[List[Dict[str, Any]]] = None
         self.debug = debug
 
+        self.system_prompt = system_prompt
         self.system_message = {
             "role": "system",
             "content": system_prompt,
@@ -76,7 +82,7 @@ class Gemma4Recognizer:
                 verbose=self.debug,
             )
 
-        actual_tools_hash = _get_tools_hash(tools)
+        actual_tools_hash = _get_tools_hash(tools, self.system_prompt)
         state_metadata_path = self.state_path.with_suffix(".sha256")
         rebuild_state = True
         if state_metadata_path.exists() and self.state_path.exists():
@@ -105,7 +111,9 @@ class Gemma4Recognizer:
 
             state_metadata_path.write_text(actual_tools_hash, encoding="utf-8")
 
-    def get_tool_calls(self, text: str) -> List[Tuple[str, Dict[str, Any]]]:
+    def get_tool_calls(
+        self, text: str, language: str = "en"
+    ) -> Tuple[List[TOOL_CALL], str]:
         assert self.llm, "Not loaded"
 
         start_time = time.monotonic()
@@ -116,7 +124,9 @@ class Gemma4Recognizer:
                     self.system_message,  # type: ignore
                     {
                         "role": "user",
-                        "content": self.user_prompt.format(text=text),
+                        "content": self.user_prompt.format(
+                            text=text, language=language
+                        ),
                     },
                 ],
                 tools=self.tools,  # type: ignore
@@ -130,7 +140,7 @@ class Gemma4Recognizer:
         _LOGGER.debug("Response in %s second(s): %s", end_time - start_time, response)
 
         content = response["choices"][0]["message"]["content"]
-        return _parse_tool_calls(content)
+        return (_parse_tool_calls(content), content)
 
 
 # -----------------------------------------------------------------------------
@@ -223,5 +233,8 @@ def _split_args(raw_args: str) -> List[str]:
     return parts
 
 
-def _get_tools_hash(tools: List[Dict[str, Any]]) -> str:
-    return hashlib.sha256(json.dumps(tools).encode()).hexdigest()
+def _get_tools_hash(tools: List[Dict[str, Any]], system_prompt: str) -> str:
+    hasher = hashlib.sha256()
+    hasher.update(system_prompt.encode())
+    hasher.update(json.dumps(tools).encode())
+    return hasher.hexdigest()

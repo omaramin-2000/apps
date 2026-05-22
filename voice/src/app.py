@@ -9,13 +9,12 @@ from typing import Dict, List
 from ruamel.yaml import YAML
 from wyoming.server import AsyncServer
 
-from const import BASE_DIR, AppState, FuzzyCommand, Tool, ToolIntent
+from const import AppState, FuzzyCommand, Tool, ToolIntent
 from gemma4_recognizer import Gemma4Recognizer
 from hass_api import HomeAssistant
 from intent_server import Gemma4EventHandler
 from lang_intents import LanguageIntents
 from name_resolver import NameResolver
-from fuzzy_matcher import FuzzyMatcher
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -116,10 +115,10 @@ async def main() -> None:
     name_resolver = NameResolver()
     name_resolver.load()
 
-    fuzzy_matcher = FuzzyMatcher()
-    fuzzy_matcher.model = name_resolver.model
+    # fuzzy_matcher = FuzzyMatcher()
+    # fuzzy_matcher.model = name_resolver.model
     # fuzzy_matcher.load()
-    fuzzy_matcher.train(s for s, _ in state.fuzzy_candidates)
+    # fuzzy_matcher.train(s for s, _ in state.fuzzy_candidates)
 
     server = AsyncServer.from_uri(args.uri)
     _LOGGER.info("Ready")
@@ -132,7 +131,7 @@ async def main() -> None:
                 recognizer,
                 lang_intents,
                 name_resolver,
-                fuzzy_matcher,
+                # fuzzy_matcher,
             )
         )
     except KeyboardInterrupt:

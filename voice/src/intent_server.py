@@ -1,7 +1,7 @@
 import logging
 import time
 from collections.abc import Mapping
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Collection, Dict, List, Optional, Set
 
 from jinja2 import BaseLoader
 from jinja2.nativetypes import NativeEnvironment
@@ -13,22 +13,19 @@ from wyoming.info import Attribution, Describe, Info, IntentModel, IntentProgram
 from wyoming.intent import Entity, Intent, IntentsStart, IntentsStop, NotRecognized
 from wyoming.server import AsyncEventHandler
 
-from const import AppState, FuzzyCommand, Tool
-from gemma4_recognizer import Gemma4Recognizer
+from const import AppState, Tool
+from gemma4_recognizer import TOOL_ARGS, TOOL_CALL, Gemma4Recognizer
 from hass_api import InfoForRecognition
 from lang_intents import LanguageIntents
 from name_resolver import NameResolver
 from util import normalize_name
-from fuzzy_matcher import FuzzyMatcher
 
 _LOGGER = logging.getLogger(__name__)
 
-TOOL_ARGS = Dict[str, Any]
-TOOL_CALL = Tuple[str, TOOL_ARGS]
 AREA_SLOT = "area"
 FLOOR_SLOT = "floor"
 
-_MIN_FUZZY_SCORE = 0.85
+# _MIN_FUZZY_SCORE = 0.85
 _RAPID_FUZZ_CUTOFF = 95
 _ENV = NativeEnvironment(loader=BaseLoader())
 
@@ -46,7 +43,7 @@ class Gemma4EventHandler(AsyncEventHandler):
         recognizer: Gemma4Recognizer,
         lang_intents: LanguageIntents,
         name_resolver: NameResolver,
-        fuzzy_matcher: FuzzyMatcher,
+        # fuzzy_matcher: FuzzyMatcher,
         *args,
         **kwargs,
     ) -> None:
@@ -58,7 +55,7 @@ class Gemma4EventHandler(AsyncEventHandler):
         self.recognizer = recognizer
         self.lang_intents = lang_intents
         self.name_resolver = name_resolver
-        self.fuzzy_matcher = fuzzy_matcher
+        # self.fuzzy_matcher = fuzzy_matcher
 
         self._info_event: Optional[Event] = None
 
@@ -89,8 +86,8 @@ class Gemma4EventHandler(AsyncEventHandler):
 
             try:
                 hass_info = await self.state.hass.get_info(device_id, satellite_id)
-                # await self._handle_transcript_gemma(transcript, hass_info)
-                await self._handle_transcript_fuzzy(transcript, hass_info)
+                await self._handle_transcript_gemma(transcript, hass_info)
+                # await self._handle_transcript_fuzzy(transcript, hass_info)
             except Exception:
                 _LOGGER.exception("Unexpected error during handling")
                 await self.write_event(
@@ -103,92 +100,90 @@ class Gemma4EventHandler(AsyncEventHandler):
 
         return True
 
-    async def _handle_transcript_fuzzy(
-        self, transcript: Transcript, hass_info: InfoForRecognition
-    ) -> None:
-        cand_match = self.fuzzy_matcher.match_candidate(
-            transcript.text, language=transcript.language or "en"
-        )
-        command: Optional[FuzzyCommand] = None
-        if cand_match is not None:
-            command_text, command_idx = self.state.fuzzy_candidates[
-                cand_match.candidate_idx
-            ]
-            command = self.state.fuzzy_commands[command_idx]
-            if cand_match.score < _MIN_FUZZY_SCORE:
-                _LOGGER.debug(
-                    "Fuzzy command score was too low: text=%s, match=%s, command=%s",
-                    command_text,
-                    cand_match,
-                    command,
-                )
-                command = None
-            else:
-                _LOGGER.debug("Matched fuzzy command: %s", command)
+    # async def _handle_transcript_fuzzy(
+    #     self, transcript: Transcript, hass_info: InfoForRecognition
+    # ) -> None:
+    #     cand_match = self.fuzzy_matcher.match_candidate(
+    #         transcript.text, language=transcript.language or "en"
+    #     )
+    #     command: Optional[FuzzyCommand] = None
+    #     if cand_match is not None:
+    #         command_text, command_idx = self.state.fuzzy_candidates[
+    #             cand_match.candidate_idx
+    #         ]
+    #         command = self.state.fuzzy_commands[command_idx]
+    #         if cand_match.score < _MIN_FUZZY_SCORE:
+    #             _LOGGER.debug(
+    #                 "Fuzzy command score was too low: text=%s, match=%s, command=%s",
+    #                 command_text,
+    #                 cand_match,
+    #                 command,
+    #             )
+    #             command = None
+    #         else:
+    #             _LOGGER.debug("Matched fuzzy command: %s", command)
 
-        if (cand_match is None) or (command is None):
-            await self.write_event(
-                NotRecognized(
-                    text=self.lang_intents.get_error_response(
-                        language=transcript.language or "en", key="no_intent"
-                    ),
-                    context=transcript.context,
-                ).event()
-            )
-            return
+    #     if (cand_match is None) or (command is None):
+    #         await self.write_event(
+    #             NotRecognized(
+    #                 text=self.lang_intents.get_error_response(
+    #                     language=transcript.language or "en", key="no_intent"
+    #                 ),
+    #                 context=transcript.context,
+    #             ).event()
+    #         )
+    #         return
 
-        intent_name = command.intent_name
-        intent_slots: Dict[str, Any] = {}
+    #     intent_name = command.intent_name
+    #     intent_slots: Dict[str, Any] = {}
 
-        if command.intent_slots:
-            intent_slots.update(command.intent_slots)
+    #     if command.intent_slots:
+    #         intent_slots.update(command.intent_slots)
 
-        if command.context_area and (not intent_slots.get(AREA_SLOT)):
-            context_area_id = hass_info.current_area_id or self.state.default_area_id
-            if context_area_id:
-                intent_slots[AREA_SLOT] = context_area_id
+    #     if command.context_area and (not intent_slots.get(AREA_SLOT)):
+    #         context_area_id = hass_info.current_area_id or self.state.default_area_id
+    #         if context_area_id:
+    #             intent_slots[AREA_SLOT] = context_area_id
 
-        template_vars: Dict[str, Any] = {"slots": intent_slots}
-        if command.number and (cand_match.number is not None):
-            template_vars["number"] = cand_match.number
+    #     template_vars: Dict[str, Any] = {"slots": intent_slots}
+    #     if command.number and (cand_match.number is not None):
+    #         template_vars["number"] = cand_match.number
 
-        if command.duration and (cand_match.duration is not None):
-            template_vars["duration"] = cand_match.duration
+    #     if command.duration and (cand_match.duration is not None):
+    #         template_vars["duration"] = cand_match.duration
 
-        if is_template_string(intent_name):
-            intent_name = render_template(intent_name, template_vars)
+    #     if is_template_string(intent_name):
+    #         intent_name = render_template(intent_name, template_vars)
 
-        intent_slots = render_templates_recursive(intent_slots, template_vars)
+    #     intent_slots = render_templates_recursive(intent_slots, template_vars)
 
-        _LOGGER.debug("Intent: name=%s, slots=%s", intent_name, intent_slots)
-        await self.write_event(
-            Intent(
-                name=intent_name,
-                entities=[
-                    Entity(name=name, value=value)
-                    for name, value in intent_slots.items()
-                ],
-                text=self.lang_intents.get_intent_response(
-                    language=transcript.language or "en",
-                    intent_name=command.intent_name,
-                    intent_slots=intent_slots,
-                ),
-                context=transcript.context,
-            ).event()
-        )
+    #     _LOGGER.debug("Intent: name=%s, slots=%s", intent_name, intent_slots)
+    #     await self.write_event(
+    #         Intent(
+    #             name=intent_name,
+    #             entities=[
+    #                 Entity(name=name, value=value)
+    #                 for name, value in intent_slots.items()
+    #             ],
+    #             text=self.lang_intents.get_intent_response(
+    #                 language=transcript.language or "en",
+    #                 intent_name=command.intent_name,
+    #                 intent_slots=intent_slots,
+    #             ),
+    #             context=transcript.context,
+    #         ).event()
+    #     )
 
     async def _handle_transcript_gemma(
         self, transcript: Transcript, hass_info: InfoForRecognition
     ) -> None:
-        tool_calls = self.recognizer.get_tool_calls(transcript.text)
+        language = transcript.language or "en"
+        tool_calls, response_text = self.recognizer.get_tool_calls(
+            transcript.text, language
+        )
         if not tool_calls:
             await self.write_event(
-                NotRecognized(
-                    text=self.lang_intents.get_error_response(
-                        language=transcript.language or "en", key="no_intent"
-                    ),
-                    context=transcript.context,
-                ).event()
+                NotRecognized(text=response_text, context=transcript.context).event()
             )
             return
 
@@ -226,7 +221,7 @@ class Gemma4EventHandler(AsyncEventHandler):
                         for name, value in intent_slots.items()
                     ],
                     text=self.lang_intents.get_intent_response(
-                        language=transcript.language or "en",
+                        language=language,
                         intent_name=intent_name,
                         intent_slots=intent_slots,
                     ),
@@ -331,7 +326,7 @@ class Gemma4EventHandler(AsyncEventHandler):
         entity_names: Dict[str, str] = {}
         entity_names_norm: Dict[str, str] = {}
 
-        entities = hass_info.entities.values()
+        entities: Collection[Entity] = hass_info.entities.values()
         if name_domains:
             entities = [e for e in entities if e.domain in name_domains]
 

@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Set, List, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from hass_api import HomeAssistant
 

@@ -24,9 +24,13 @@ _LOGGER = logging.getLogger(__name__)
 
 AREA_SLOT = "area"
 FLOOR_SLOT = "floor"
+ENTITY_NAME_SLOT = "name"
+DOMAIN_SLOT = "domain"
 
 # _MIN_FUZZY_SCORE = 0.85
 _RAPID_FUZZ_CUTOFF = 95
+_NAME_THRESHOLD = 0.9
+_TODO_THRESHOLD = 0.85
 _ENV = NativeEnvironment(loader=BaseLoader())
 
 
@@ -192,18 +196,17 @@ class Gemma4EventHandler(AsyncEventHandler):
         for tool_name, tool_args in tool_calls:
             tool = self.state.tools[tool_name]
 
-            # TODO
-            # try:
-            #     self._resolve_names(tool, tool_args, hass_info)
-            # except UnresolvedNameError:
-            #     _LOGGER.exception(
-            #         "Failed to resolve names: tool_name=%s, tool_args=%s",
-            #         tool_name,
-            #         tool_args,
-            #     )
-            #     # Fail
-            #     intent_events.clear()
-            #     break
+            try:
+                self._resolve_names(tool, tool_args, hass_info)
+            except UnresolvedNameError:
+                _LOGGER.exception(
+                    "Failed to resolve names: tool_name=%s, tool_args=%s",
+                    tool_name,
+                    tool_args,
+                )
+                # Fail
+                intent_events.clear()
+                break
 
             if tool.intent:
                 intent_name, intent_slots = self._tool_call_to_intent(
@@ -211,6 +214,14 @@ class Gemma4EventHandler(AsyncEventHandler):
                 )
             else:
                 intent_name, intent_slots = tool_name, tool_args
+
+            if intent_name in ("HassListCompleteItem", "HassListRemoveItem"):
+                todo_entity_id = intent_slots.get(ENTITY_NAME_SLOT) or ""
+                if todo_entity_id.startswith("todo."):
+                    todo_item = intent_slots["item"]
+                    await self._resolve_todo_item(
+                        todo_item, todo_entity_id, intent_slots
+                    )
 
             _LOGGER.debug("Intent: name=%s, slots=%s", intent_name, intent_slots)
             intent_events.append(
@@ -239,7 +250,7 @@ class Gemma4EventHandler(AsyncEventHandler):
             await self.write_event(
                 NotRecognized(
                     text=self.lang_intents.get_error_response(
-                        language=transcript.language or "en", key="handle_error"
+                        language=language, key="handle_error"
                     ),
                     context=transcript.context,
                 ).event()
@@ -269,14 +280,20 @@ class Gemma4EventHandler(AsyncEventHandler):
             # Ensure area/floor ids are deconflicted
             mapped_id = f"area_{area.area_id}"
             for area_name in area.names:
-                location_names[area_name] = mapped_id
+                if area_name:
+                    location_names[area_name] = mapped_id
             for area_name_norm in area.names_norm:
-                location_names_norm[area_name_norm] = mapped_id
+                if area_name_norm:
+                    location_names_norm[area_name_norm] = mapped_id
         for floor in hass_info.floors.values():
             # Ensure area/floor ids are deconflicted
             mapped_id = f"floor_{floor.floor_id}"
-            location_names[floor.name] = mapped_id
-            location_names_norm[floor.name_norm] = mapped_id
+            for floor_name in floor.names:
+                if floor_name:
+                    location_names[floor_name] = mapped_id
+            for floor_name_norm in floor.names_norm:
+                if floor_name_norm:
+                    location_names_norm[floor_name_norm] = mapped_id
 
         best_id: Optional[str] = location_names.get(location)
         if not best_id:
@@ -284,7 +301,7 @@ class Gemma4EventHandler(AsyncEventHandler):
 
         if not best_id:
             best_name = self.name_resolver.best_candidate(
-                location, list(location_names)
+                location, list(location_names), threshold=_NAME_THRESHOLD
             )
             if best_name:
                 best_id = location_names[best_name]
@@ -307,13 +324,17 @@ class Gemma4EventHandler(AsyncEventHandler):
             if location_type == "area":
                 best_area = hass_info.areas[location_id]
                 _LOGGER.debug("Resolved %s to %s", location, best_area)
-                tool_args[AREA_SLOT] = best_area
+                tool_args[AREA_SLOT] = best_area.area_id
             elif location_type == "floor":
                 best_floor = hass_info.floors[location_id]
                 _LOGGER.debug("Resolved %s to %s", location, best_floor)
-                tool_args[FLOOR_SLOT] = best_floor
+                tool_args[FLOOR_SLOT] = best_floor.floor_id
         else:
-            raise UnresolvedNameError(f"Unable to resolve location: {location}")
+            # Try to pass directly as an area
+            _LOGGER.warning(
+                "Couldn't resolve location name. Assuming area: %s", location
+            )
+            tool_args[AREA_SLOT] = location
 
     def _resolve_entity(
         self,
@@ -332,9 +353,11 @@ class Gemma4EventHandler(AsyncEventHandler):
 
         for entity in entities:
             for name in entity.names:
-                entity_names[name] = entity.entity_id
+                if name:
+                    entity_names[name] = entity.entity_id
             for entity_name_norm in entity.names_norm:
-                entity_names_norm[entity_name_norm] = entity.entity_id
+                if entity_name_norm:
+                    entity_names_norm[entity_name_norm] = entity.entity_id
 
         best_id: Optional[str] = entity_names.get(entity_name)
         if not best_id:
@@ -342,7 +365,7 @@ class Gemma4EventHandler(AsyncEventHandler):
 
         if not best_id:
             best_name = self.name_resolver.best_candidate(
-                entity_name, list(entity_names)
+                entity_name, list(entity_names), threshold=_NAME_THRESHOLD
             )
             if best_name:
                 best_id = entity_names[best_name]
@@ -364,9 +387,41 @@ class Gemma4EventHandler(AsyncEventHandler):
         if best_id:
             best_entity = hass_info.entities[best_id]
             _LOGGER.debug("Resolved %s to %s", entity_name, best_entity)
-            tool_args["entity"] = best_entity
+            tool_args[ENTITY_NAME_SLOT] = best_entity.entity_id
+            tool_args[DOMAIN_SLOT] = best_entity.domain
         else:
-            raise UnresolvedNameError(f"Unable to resolve entity: {entity_name}")
+            # Try to pass directly as a name
+            _LOGGER.warning("Couldn't resolve entity name: %s", entity_name)
+            tool_args[ENTITY_NAME_SLOT] = entity_name
+
+    async def _resolve_todo_item(
+        self,
+        item: str,
+        entity_id: str,
+        intent_slots: Dict[str, Any],
+    ) -> None:
+        response = (
+            await self.state.hass.call_service(
+                "todo",
+                "get_items",
+                service_data={"status": "needs_action"},
+                target={"entity_id": entity_id},
+                return_response=True,
+            )
+            or {}
+        )
+        _LOGGER.debug(response)
+
+        items = response.get(entity_id, {}).get("items")
+        if not items:
+            return
+
+        best_item = self.name_resolver.best_candidate(
+            item, [item["summary"] for item in items], threshold=_TODO_THRESHOLD
+        )
+        if best_item:
+            _LOGGER.debug("Resolved todo item '%s' to '%s'", item, best_item)
+            intent_slots["item"] = best_item
 
     def _tool_call_to_intent(
         self, tool: Tool, tool_args: TOOL_ARGS, hass_info: InfoForRecognition

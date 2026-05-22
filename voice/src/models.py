@@ -52,6 +52,8 @@ class Entity:
 
     def __post_init__(self) -> None:
         self.domain = self.entity_id.split(".", maxsplit=1)[0]
+        if self.aliases:
+            self.aliases = [a for a in self.aliases if a.strip()]
 
     @property
     def names(self) -> Iterable[str]:
@@ -91,6 +93,10 @@ class Area:
 
     _names_norm: Optional[List[str]] = None
 
+    def __post_init__(self) -> None:
+        if self.aliases:
+            self.aliases = [a for a in self.aliases if a.strip()]
+
     @property
     def names(self) -> Iterable[str]:
         if not self.aliases:
@@ -113,5 +119,23 @@ class Floor:
     aliases: Optional[List[str]] = None
     name_norm: str = field(init=False)
 
+    _names_norm: Optional[List[str]] = None
+
     def __post_init__(self) -> None:
         self.name_norm = normalize_name(self.name)
+        if self.aliases:
+            self.aliases = [a for a in self.aliases if a.strip()]
+
+    @property
+    def names(self) -> Iterable[str]:
+        if not self.aliases:
+            return [self.name]
+
+        return itertools.chain([self.name], self.aliases)
+
+    @property
+    def names_norm(self) -> List[str]:
+        if self._names_norm is None:
+            self._names_norm = [normalize_name(name) for name in self.names]
+
+        return self._names_norm

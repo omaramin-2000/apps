@@ -49,21 +49,29 @@ class LanguageIntents:
         if len(responses) == 1:
             return next(iter(responses.values()))
 
-        text = responses.get(default_key)
-        if text:
-            return text
-
+        key: Optional[str] = None
         if intent_slots is None:
             intent_slots = {}
 
-        if intent_name == "HassLightSet":
+        domain = intent_slots.get("domain")
+
+        if intent_name in ("HassTurnOn", "HassTurnOff"):
+            if domain in ("cover", "value"):
+                key = domain
+            elif "area" in intent_slots:
+                if domain == "light":
+                    key = "lights_area"
+            elif "floor" in intent_slots:
+                if domain == "light":
+                    key = "lights_floor"
+        elif intent_name == "HassLightSet":
             if "brightness" in intent_slots:
-                return responses.get("brightness")
+                key = "brightness"
+            elif "color" in intent_slots:
+                key = "color"
 
-            if "color" in intent_slots:
-                return responses.get("color")
-
-        return None
+        key = key or default_key
+        return responses.get(key)
 
     def get_error_response(self, language: str, key: str) -> Optional[str]:
         return (

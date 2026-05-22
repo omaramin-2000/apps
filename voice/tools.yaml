@@ -96,7 +96,7 @@
     type: function
     function:
       name: lights_on_off
-      description: Turn the lights on or off in the current area
+      description: Turn the lights on or off in the current area or a named location
       parameters:
         type: object
         properties:
@@ -105,9 +105,9 @@
             enum:
               - "on"
               - "off"
-          # location:
-          #   type: string
-          #   description: Location name like office or upstairs
+          location:
+            type: string
+            description: Location name like office or upstairs
         required:
           - action
   intent:
@@ -119,15 +119,15 @@
       {%- endif-%}
     slots:
       domain: light
-      # area: "{%- if area-%}{{area.area_id}}{% endif %}"
-      # floor: "{%- if floor-%}{{floor.floor_id}}{% endif %}"
+      area: "{%- if area-%}{{area}}{% endif %}"
+      floor: "{%- if floor-%}{{floor}}{% endif %}"
   context_area: true
 
 - tool:
     type: function
     function:
       name: set_light_property
-      description: Set the brightness or color of the lights in the current area
+      description: Set the brightness or color of the lights in the current area or a named location
       parameters:
         type: object
         properties:
@@ -139,16 +139,16 @@
           color:
             type: string
             description: Color name like red or blue (always in English)
-          # location:
-          #   type: string
-          #   description: Location name like office or upstairs
+          location:
+            type: string
+            description: Location name like office or upstairs
   intent:
     name: HassLightSet
     slots:
       brightness: "{{brightness | default(none)}}"
       color: "{{color | default(none)}}"
-      # area: "{%- if area-%}{{area.area_id}}{% endif %}"
-      # floor: "{%- if floor-%}{{floor.floor_id}}{% endif %}"
+      area: "{%- if area-%}{{area}}{% endif %}"
+      floor: "{%- if floor-%}{{floor}}{% endif %}"
   context_area: true
 
 # -----------------------------------------------------------------------------
@@ -159,72 +159,74 @@
 # - set pergola roof position to 50%
 # - set ceiling fan speed to 50%
 # -----------------------------------------------------------------------------
-# - tool:
-#     type: function
-#     function:
-#       name: device_on_off
-#       description: Turn a device on or off by name
-#       parameters:
-#         type: object
-#         properties:
-#           action:
-#             type: string
-#             enum:
-#               - "on"
-#               - "off"
-#           device_name:
-#             type: string
-#             description: Full name of the device
-#         required:
-#           - action
-#           - device_name
-#   intent:
-#     name: >-
-#       {%- if action == 'on'-%}
-#       HassTurnOn
-#       {%- elif action == 'off'-%}
-#       HassTurnOff
-#       {%- endif-%}
-#     slots:
-#       name: "{{entity.entity_id}}"
-#   name_domains:
-#     - light
-#     - switch
-#     - fan
-#     - media_player
-#     - input_boolean
+- tool:
+    type: function
+    function:
+      name: device_on_off
+      description: Turn a device on or off by name
+      parameters:
+        type: object
+        properties:
+          action:
+            type: string
+            enum:
+              - "on"
+              - "off"
+          device_name:
+            type: string
+            description: Full name of the device as written
+        required:
+          - action
+          - device_name
+  intent:
+    name: >-
+      {%- if action == 'on'-%}
+      HassTurnOn
+      {%- elif action == 'off'-%}
+      HassTurnOff
+      {%- endif-%}
+    slots:
+      domain: "{{domain|default(none)}}"
+      name: "{{name}}"
+  name_domains:
+    - light
+    - switch
+    - fan
+    - media_player
+    - input_boolean
 
-# - tool:
-#     type: function
-#     function:
-#       name: cover_open_close
-#       description: Open or close a device by name
-#       parameters:
-#         type: object
-#         properties:
-#           action:
-#             type: string
-#             enum:
-#               - open
-#               - close
-#           device_name:
-#             type: string
-#             description: Full name of the device
-#         required:
-#           - action
-#           - device_name
-#   intent:
-#     name: >-
-#       {%- if action == 'open'-%}
-#       HassTurnOn
-#       {%- elif action == 'close'-%}
-#       HassTurnOff
-#       {%- endif-%}
-#     slots:
-#       name: "{{entity.entity_id}}"
-#   name_domains:
-#     - cover
-#     - valve
+- tool:
+    type: function
+    function:
+      name: cover_open_close
+      description: Open or close a device by name
+      parameters:
+        type: object
+        properties:
+          action:
+            type: string
+            enum:
+              - open
+              - close
+          device_name:
+            type: string
+            description: Full name of the device as written
+        required:
+          - action
+          - device_name
+  intent:
+    name: >-
+      {%- if action == 'open'-%}
+      HassTurnOn
+      {%- elif action == 'close'-%}
+      HassTurnOff
+      {%- endif-%}
+    slots:
+      domain: "{{domain|default(none)}}"
+      name: "{{name}}"
+  name_domains:
+    - cover
+    - valve
 
 # - tool:
 #     type: function
@@ -253,7 +255,8 @@
 #       HassTurnOff
 #       {%- endif-%}
 #     slots:
-#       name: "{{entity.entity_id}}"
+#       domain: lock
+#       name: "{{name}}"
 #   name_domains:
 #     - lock
 
@@ -279,7 +282,8 @@
 #   intent:
 #     name: HassSetPosition
 #     slots:
-#       name: "{{entity.entity_id}}"
+#       domain: "{{domain|default(none)}}"
+#       name: "{{name}}"
 #       position: "{{position}}"
 #   name_domains:
 #     - cover
@@ -307,7 +311,7 @@
 #   intent:
 #     name: HassFanSetSpeed
 #     slots:
-#       name: "{{entity.entity_id}}"
+#       name: "{{name}}"
 #       speed: "{{speed}}"
 
 # -----------------------------------------------------------------------------
@@ -348,7 +352,7 @@
       HassMediaNext
       {%- endif-%}
   #   slots:
-  #     name: "{%- if entity-%}{{entity.entity_id}}{% endif %}"
+  #     name: "{%- if entity-%}{{name}}{% endif %}"
   # name_domains:
   #   - media_player
   context_area: true
@@ -387,7 +391,7 @@
       HassSetVolume
       {%- endif-%}
     slots:
-      # name: "{%- if entity-%}{{entity.entity_id}}{% endif %}"
+      # name: "{%- if entity-%}{{name}}{% endif %}"
       volume_level: "{%- if action == 'set'-%}{{volume | int}}{% endif %}"
       volume_step: >-
         {%- if action == 'increase' -%}
@@ -501,8 +505,8 @@
 - tool:
     type: function
     function:
-      name: update_todo
-      description: Add, complete, or remove a task on the todo list. Multiple items should be split into multiple tool calls.
+      name: update_list
+      description: Add, complete, or remove a task on a list. Multiple items should be split into multiple tool calls.
       parameters:
         type: object
         properties:
@@ -531,38 +535,38 @@
       HassListRemoveItem
       {%- endif-%}
     slots:
-      name: "{{entity.entity_id}}"
+      name: "{{name}}"
       item: "{{item}}"
   name_domains:
     - todo
 
-- tool:
-    type: function
-    function:
-      name: update_shopping_list
-      description: Add or complete a single item on the shopping list. Multiple items should be split into multiple tool calls.
-      parameters:
-        type: object
-        properties:
-          item:
-            type: string
-          action:
-            type: string
-            enum:
-              - add
-              - complete
-              - remove
-        required:
-          - item
-  intent:
-    name: >-
-      {%- if action == 'add'-%}
-      HassShoppingListAddItem
-      {%- elif action in ('complete', 'remove')-%}
-      HassShoppingListCompleteItem
-      {%- endif-%}
-    slots:
-      item: "{{item}}"
+# - tool:
+#     type: function
+#     function:
+#       name: update_shopping_list
+#       description: Add or complete a single item on the shopping list. Multiple items should be split into multiple tool calls.
+#       parameters:
+#         type: object
+#         properties:
+#           item:
+#             type: string
+#           action:
+#             type: string
+#             enum:
+#               - add
+#               - complete
+#               - remove
+#         required:
+#           - item
+#   intent:
+#     name: >-
+#       {%- if action == 'add'-%}
+#       HassShoppingListAddItem
+#       {%- elif action in ('complete', 'remove')-%}
+#       HassShoppingListCompleteItem
+#       {%- endif-%}
+#     slots:
+#       item: "{{item}}"
 
 # -----------------------------------------------------------------------------
 # get state (TODO)

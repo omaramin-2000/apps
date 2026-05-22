@@ -310,7 +310,8 @@ class HomeAssistant:
         service: str,
         service_data: Optional[Dict[str, Any]] = None,
         target: Optional[Dict[str, Any]] = None,
-    ) -> None:
+        return_response: bool = False,
+    ) -> Optional[Dict[str, Any]]:
         current_id = 0
 
         def next_id() -> int:
@@ -352,8 +353,11 @@ class HomeAssistant:
                         "service": service,
                         "service_data": service_data or {},
                         "target": target or {},
+                        "return_response": return_response,
                     },
                 )
                 msg = await websocket.receive_json()
                 if not msg["success"]:
                     raise HomeAssistantError(msg["error"]["message"])
+
+                return msg.get("result", {}).get("response")

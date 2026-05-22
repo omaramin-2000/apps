@@ -13,19 +13,23 @@ from wyoming.info import Attribution, Describe, Info, IntentModel, IntentProgram
 from wyoming.intent import Entity, Intent, IntentsStart, IntentsStop, NotRecognized
 from wyoming.server import AsyncEventHandler
 
-from const import AppState, Tool, ToolIntent
+from const import AppState, FuzzyCommand, Tool
 from gemma4_recognizer import Gemma4Recognizer
 from hass_api import InfoForRecognition
 from lang_intents import LanguageIntents
 from name_resolver import NameResolver
 from util import normalize_name
+from fuzzy_matcher import FuzzyMatcher
 
 _LOGGER = logging.getLogger(__name__)
 
 TOOL_ARGS = Dict[str, Any]
 TOOL_CALL = Tuple[str, TOOL_ARGS]
+AREA_SLOT = "area"
+FLOOR_SLOT = "floor"
 
-_FUZZY_SCORE_CUTOFF = 95
+_MIN_FUZZY_SCORE = 0.85
+_RAPID_FUZZ_CUTOFF = 95
 _ENV = NativeEnvironment(loader=BaseLoader())
 
 
@@ -42,6 +46,7 @@ class Gemma4EventHandler(AsyncEventHandler):
         recognizer: Gemma4Recognizer,
         lang_intents: LanguageIntents,
         name_resolver: NameResolver,
+        fuzzy_matcher: FuzzyMatcher,
         *args,
         **kwargs,
     ) -> None:
@@ -53,6 +58,7 @@ class Gemma4EventHandler(AsyncEventHandler):
         self.recognizer = recognizer
         self.lang_intents = lang_intents
         self.name_resolver = name_resolver
+        self.fuzzy_matcher = fuzzy_matcher
 
         self._info_event: Optional[Event] = None
 
@@ -83,7 +89,8 @@ class Gemma4EventHandler(AsyncEventHandler):
 
             try:
                 hass_info = await self.state.hass.get_info(device_id, satellite_id)
-                await self._handle_transcript(transcript, hass_info)
+                # await self._handle_transcript_gemma(transcript, hass_info)
+                await self._handle_transcript_fuzzy(transcript, hass_info)
             except Exception:
                 _LOGGER.exception("Unexpected error during handling")
                 await self.write_event(
@@ -96,7 +103,81 @@ class Gemma4EventHandler(AsyncEventHandler):
 
         return True
 
-    async def _handle_transcript(
+    async def _handle_transcript_fuzzy(
+        self, transcript: Transcript, hass_info: InfoForRecognition
+    ) -> None:
+        cand_match = self.fuzzy_matcher.match_candidate(
+            transcript.text, language=transcript.language or "en"
+        )
+        command: Optional[FuzzyCommand] = None
+        if cand_match is not None:
+            command_text, command_idx = self.state.fuzzy_candidates[
+                cand_match.candidate_idx
+            ]
+            command = self.state.fuzzy_commands[command_idx]
+            if cand_match.score < _MIN_FUZZY_SCORE:
+                _LOGGER.debug(
+                    "Fuzzy command score was too low: text=%s, match=%s, command=%s",
+                    command_text,
+                    cand_match,
+                    command,
+                )
+                command = None
+            else:
+                _LOGGER.debug("Matched fuzzy command: %s", command)
+
+        if (cand_match is None) or (command is None):
+            await self.write_event(
+                NotRecognized(
+                    text=self.lang_intents.get_error_response(
+                        language=transcript.language or "en", key="no_intent"
+                    ),
+                    context=transcript.context,
+                ).event()
+            )
+            return
+
+        intent_name = command.intent_name
+        intent_slots: Dict[str, Any] = {}
+
+        if command.intent_slots:
+            intent_slots.update(command.intent_slots)
+
+        if command.context_area and (not intent_slots.get(AREA_SLOT)):
+            context_area_id = hass_info.current_area_id or self.state.default_area_id
+            if context_area_id:
+                intent_slots[AREA_SLOT] = context_area_id
+
+        template_vars: Dict[str, Any] = {"slots": intent_slots}
+        if command.number and (cand_match.number is not None):
+            template_vars["number"] = cand_match.number
+
+        if command.duration and (cand_match.duration is not None):
+            template_vars["duration"] = cand_match.duration
+
+        if is_template_string(intent_name):
+            intent_name = render_template(intent_name, template_vars)
+
+        intent_slots = render_templates_recursive(intent_slots, template_vars)
+
+        _LOGGER.debug("Intent: name=%s, slots=%s", intent_name, intent_slots)
+        await self.write_event(
+            Intent(
+                name=intent_name,
+                entities=[
+                    Entity(name=name, value=value)
+                    for name, value in intent_slots.items()
+                ],
+                text=self.lang_intents.get_intent_response(
+                    language=transcript.language or "en",
+                    intent_name=command.intent_name,
+                    intent_slots=intent_slots,
+                ),
+                context=transcript.context,
+            ).event()
+        )
+
+    async def _handle_transcript_gemma(
         self, transcript: Transcript, hass_info: InfoForRecognition
     ) -> None:
         tool_calls = self.recognizer.get_tool_calls(transcript.text)
@@ -116,20 +197,23 @@ class Gemma4EventHandler(AsyncEventHandler):
         for tool_name, tool_args in tool_calls:
             tool = self.state.tools[tool_name]
 
-            try:
-                self._resolve_names(tool, tool_args, hass_info)
-            except UnresolvedNameError:
-                _LOGGER.exception(
-                    "Failed to resolve names: tool_name=%s, tool_args=%s",
-                    tool_name,
-                    tool_args,
-                )
-                # Fail
-                intent_events.clear()
-                break
+            # TODO
+            # try:
+            #     self._resolve_names(tool, tool_args, hass_info)
+            # except UnresolvedNameError:
+            #     _LOGGER.exception(
+            #         "Failed to resolve names: tool_name=%s, tool_args=%s",
+            #         tool_name,
+            #         tool_args,
+            #     )
+            #     # Fail
+            #     intent_events.clear()
+            #     break
 
             if tool.intent:
-                intent_name, intent_slots = tool_call_to_intent(tool.intent, tool_args)
+                intent_name, intent_slots = self._tool_call_to_intent(
+                    tool, tool_args, hass_info
+                )
             else:
                 intent_name, intent_slots = tool_name, tool_args
 
@@ -144,6 +228,7 @@ class Gemma4EventHandler(AsyncEventHandler):
                     text=self.lang_intents.get_intent_response(
                         language=transcript.language or "en",
                         intent_name=intent_name,
+                        intent_slots=intent_slots,
                     ),
                     context=transcript.context,
                 )
@@ -215,7 +300,7 @@ class Gemma4EventHandler(AsyncEventHandler):
                 location_norm,
                 list(location_names_norm),
                 scorer=fuzz.ratio,
-                score_cutoff=_FUZZY_SCORE_CUTOFF,
+                score_cutoff=_RAPID_FUZZ_CUTOFF,
             )
             if result:
                 # Map back to original name
@@ -227,11 +312,11 @@ class Gemma4EventHandler(AsyncEventHandler):
             if location_type == "area":
                 best_area = hass_info.areas[location_id]
                 _LOGGER.debug("Resolved %s to %s", location, best_area)
-                tool_args["area"] = best_area
+                tool_args[AREA_SLOT] = best_area
             elif location_type == "floor":
                 best_floor = hass_info.floors[location_id]
                 _LOGGER.debug("Resolved %s to %s", location, best_floor)
-                tool_args["floor"] = best_floor
+                tool_args[FLOOR_SLOT] = best_floor
         else:
             raise UnresolvedNameError(f"Unable to resolve location: {location}")
 
@@ -273,7 +358,7 @@ class Gemma4EventHandler(AsyncEventHandler):
                 entity_norm,
                 list(entity_names_norm),
                 scorer=fuzz.ratio,
-                score_cutoff=_FUZZY_SCORE_CUTOFF,
+                score_cutoff=_RAPID_FUZZ_CUTOFF,
             )
             if result:
                 # Map back to original name
@@ -287,6 +372,40 @@ class Gemma4EventHandler(AsyncEventHandler):
             tool_args["entity"] = best_entity
         else:
             raise UnresolvedNameError(f"Unable to resolve entity: {entity_name}")
+
+    def _tool_call_to_intent(
+        self, tool: Tool, tool_args: TOOL_ARGS, hass_info: InfoForRecognition
+    ) -> TOOL_CALL:
+        assert tool.intent is not None
+
+        intent_name = tool.intent.name
+        if is_template_string(intent_name):
+            intent_name = render_template(intent_name, tool_args) or ""
+
+        intent_name = intent_name.strip()
+        if not intent_name:
+            raise ValueError("No intent name")
+
+        intent_slots: TOOL_ARGS = {}
+        if tool.intent.slots:
+            intent_slots = (
+                render_templates_recursive(tool.intent.slots, tool_args) or {}
+            )
+
+        # Remove empty values
+        if intent_slots:
+            intent_slots = {
+                key: value for key, value in intent_slots.items() if value is not None
+            }
+
+        # Fill in area from context
+        if tool.context_area and (not intent_slots.get(AREA_SLOT)):
+
+            context_area_id = hass_info.current_area_id or self.state.default_area_id
+            if context_area_id:
+                intent_slots[AREA_SLOT] = context_area_id
+
+        return (intent_name, intent_slots)
 
     async def _write_info(self) -> None:
         if self._info_event is not None:
@@ -327,28 +446,6 @@ class Gemma4EventHandler(AsyncEventHandler):
 # -----------------------------------------------------------------------------
 
 
-def tool_call_to_intent(tool_intent: ToolIntent, tool_args: TOOL_ARGS) -> TOOL_CALL:
-    intent_name = tool_intent.name
-    if is_template_string(intent_name):
-        intent_name = render_template(intent_name, tool_args) or ""
-
-    intent_name = intent_name.strip()
-    if not intent_name:
-        raise ValueError("No intent name")
-
-    intent_slots: TOOL_ARGS = {}
-    if tool_intent.slots:
-        intent_slots = render_templates_recursive(tool_intent.slots, tool_args) or {}
-
-    # Remove empty values
-    if intent_slots:
-        intent_slots = {
-            key: value for key, value in intent_slots.items() if value is not None
-        }
-
-    return (intent_name, intent_slots)
-
-
 def render_templates_recursive(data: Any, variables: Mapping[str, Any]) -> Any:
     # Template string handling
     if isinstance(data, str) and is_template_string(data):
@@ -367,7 +464,9 @@ def render_templates_recursive(data: Any, variables: Mapping[str, Any]) -> Any:
 
 
 def render_template(data: str, variables: Mapping[str, Any]) -> Any:
-    return _ENV.from_string(data).render(variables)
+    result = _ENV.from_string(data).render(variables)
+    _LOGGER.debug("Rendered template='%s', vars=%s, result=%s", data, variables, result)
+    return result
 
 
 def is_template_string(maybe_template: str) -> bool:
@@ -375,97 +474,3 @@ def is_template_string(maybe_template: str) -> bool:
     return "{" in maybe_template and (
         "{%" in maybe_template or "{{" in maybe_template or "{#" in maybe_template
     )
-
-
-# def tool_call_to_intent(tool_name: str, tool_args: TOOL_ARGS) -> TOOL_CALL:
-#     if tool_name == "start_timer":
-#         return _start_timer(tool_args)
-
-#     if tool_name == "control_timer":
-#         return _control_timer(tool_args)
-
-#     if tool_name == "lights_on_off":
-#         return _lights_on_off(tool_args)
-
-# if tool_name == "control_media":
-#     media_action = tool_args.get("action")
-#     if media_action == "pause":
-#         return ("HassMediaPause", {})
-
-#     if media_action == "resume":
-#         return ("HassMediaUnpause", {})
-
-#     if media_action == "next":
-#         return ("HassMediaNext", {})
-
-#     raise ValueError(f"Unexpected action for control_media: {media_action}")
-
-# return (tool_name, tool_args)
-
-
-def _start_timer(tool_args: TOOL_ARGS) -> TOOL_CALL:
-    total_seconds = tool_args.get("total_seconds", 0)
-    timer_args: Dict[str, Any] = {}
-    hours = total_seconds // 3600
-    if hours > 0:
-        timer_args["hours"] = hours
-    minutes = (total_seconds % 3600) // 60
-    if minutes > 0:
-        timer_args["minutes"] = minutes
-    seconds = total_seconds % 60
-    if seconds > 0:
-        timer_args["seconds"] = seconds
-
-    timer_name = tool_args.get("name")
-    if timer_name:
-        timer_args["name"] = timer_name
-
-    return ("HassStartTimer", timer_args)
-
-
-def _control_timer(tool_args: TOOL_ARGS) -> TOOL_CALL:
-    action = tool_args.get("action")
-    if action == "cancel_all":
-        return ("HassCancelAllTimers", {})
-
-    timer_args: Dict[str, Any] = {}
-    total_seconds = tool_args.get("total_seconds")
-
-    if total_seconds is not None:
-        hours = total_seconds // 3600
-        if hours > 0:
-            timer_args["start_hours"] = hours
-        minutes = (total_seconds % 3600) // 60
-        if minutes > 0:
-            timer_args["start_minutes"] = minutes
-        seconds = total_seconds % 60
-        if seconds > 0:
-            timer_args["start_seconds"] = seconds
-
-    timer_name = tool_args.get("name")
-    if timer_name:
-        timer_args["name"] = timer_name
-
-    if action == "pause":
-        return ("HassPauseTimer", timer_args)
-
-    if action == "resume":
-        return ("HassUnpauseTimer", timer_args)
-
-    if action == "cancel":
-        return ("HassCancelTimer", timer_args)
-
-    raise ValueError(f"Unexpected action for control_timer: {action}")
-
-
-def _lights_on_off(tool_args: TOOL_ARGS) -> TOOL_CALL:
-    action = tool_args.get("action")
-    light_args = {"domain": "light"}
-
-    if action == "on":
-        return ("HassTurnOn", light_args)
-
-    if action == "off":
-        return ("HassTurnOff", light_args)
-
-    raise ValueError(f"Unexpected action for lights_on_off: {action}")

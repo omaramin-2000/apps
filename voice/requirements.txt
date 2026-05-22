@@ -9,3 +9,5 @@ sentence-transformers
 wyoming>=1.9.0
 jinja2
 rapidfuzz
+ovos-number-parser
+ovos-date-parser

@@ -32,7 +32,7 @@ class NameResolver:
         margin: float = 0.02,
     ) -> Optional[str]:
         if not candidates:
-            return target
+            return None
 
         ranked = self.rank_candidates(target, candidates, top_k=2)
         _LOGGER.debug("Top candidates for '%s': %s", target, ranked)
@@ -49,7 +49,7 @@ class NameResolver:
 
         if len(ranked) < 2:
             # Can't calculate margin
-            return target
+            return candidates[0]
 
         # TODO: if candidates are too close, prefer the one that's in the
         # current area.

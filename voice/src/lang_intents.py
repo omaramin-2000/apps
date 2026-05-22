@@ -34,7 +34,11 @@ class LanguageIntents:
         return self.lang_intents.get(language, {})
 
     def get_intent_response(
-        self, language: str, intent_name: str, default_key: str = "default"
+        self,
+        language: str,
+        intent_name: str,
+        intent_slots: Optional[Dict[str, Any]],
+        default_key: str = "default",
     ) -> Optional[str]:
         responses = (
             self.get_lang_intents(language)
@@ -45,7 +49,21 @@ class LanguageIntents:
         if len(responses) == 1:
             return next(iter(responses.values()))
 
-        return responses.get(default_key)
+        text = responses.get(default_key)
+        if text:
+            return text
+
+        if intent_slots is None:
+            intent_slots = {}
+
+        if intent_name == "HassLightSet":
+            if "brightness" in intent_slots:
+                return responses.get("brightness")
+
+            if "color" in intent_slots:
+                return responses.get("color")
+
+        return None
 
     def get_error_response(self, language: str, key: str) -> Optional[str]:
         return (

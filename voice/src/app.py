@@ -16,6 +16,7 @@ from hass_api import HomeAssistant
 from intent_server import Gemma4EventHandler
 from lang_intents import LanguageIntents
 from name_resolver import NameResolver
+from web_server import make_web_server, run_web_server
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,8 +29,8 @@ async def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--uri", required=True, help="unix:// or tcp://")
     #
-    # parser.add_argument("--http-host")
-    # parser.add_argument("--http-port", type=int, default=5000)
+    parser.add_argument("--http-host", default="127.0.0.1")
+    parser.add_argument("--http-port", type=int, default=5000)
     #
     parser.add_argument("--hass-token", required=True)
     parser.add_argument("--hass-api", default="http://homeassistant.local:8123")
@@ -120,8 +121,8 @@ async def main() -> None:
 
     state = AppState(
         hass=HomeAssistant(token=args.hass_token, api_url=args.hass_api),
-        # http_host=args.http_host,
-        # http_port=args.http_port,
+        http_host=args.http_host,
+        http_port=args.http_port,
         tools=tools,
         resolver_en_model=args.resolver_en_model,
         resolver_multilingual_model=args.resolver_multilingual_model,
@@ -151,6 +152,10 @@ async def main() -> None:
     # fuzzy_matcher.model = name_resolver.model
     # fuzzy_matcher.load()
     # fuzzy_matcher.train(s for s, _ in state.fuzzy_candidates)
+
+    flask_app = make_web_server(state)
+    flask_thread = run_web_server(state, flask_app)
+    flask_thread.start()
 
     server = AsyncServer.from_uri(args.uri)
     _LOGGER.info("Ready")

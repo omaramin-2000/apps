@@ -33,7 +33,6 @@ def run_web_server(state: AppState, flask_app: Flask) -> threading.Thread:
         flask_app.run(host=state.http_host, port=state.http_port, use_reloader=False)
 
     flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
 
     return flask_thread
 

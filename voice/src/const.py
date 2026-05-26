@@ -37,8 +37,8 @@ class FuzzyCommand:
 @dataclass
 class AppState:
     hass: HomeAssistant
-    # http_host: str
-    # http_port: int
+    http_host: str
+    http_port: int
     tools: Dict[str, Tool]
 
     fuzzy_commands: List[FuzzyCommand]

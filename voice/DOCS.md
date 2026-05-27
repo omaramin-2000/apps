@@ -10,6 +10,8 @@ Installing the app can take quite a while, since it builds an optimized version 
 
 On first boot of the app, the [LLM model](#conversation) must be downloaded (about 4GB). If you have a Hugging Face account, putting your token in the app settings (`hf_token`) may speed up the download.
 
+Once the app boots, check "Devices & Settings" for a newly discovered voice conversation agent and add it. Select this agent in your voice pipeline, optionally checking "Prefer handling commands locally" if you want Home Assistant to try to recognize commands before sending them to the LLM.
+
 ## Conversation
 
 An LLM [conversation][] agent built on [Gemma 4][gemma4] is used to recognize [intents][] from voice commands.

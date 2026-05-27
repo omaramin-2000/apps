@@ -8,20 +8,20 @@ This app is a work in progress, so expect things to be unpolished!
 
 Installing the app can take quite a while, since it builds an optimized version of [llama.cpp] for your CPU.
 
-On first boot of the app, the [LLM model](#conversation) must be downloaded (about 4GB). If you have a HuggingFace account, putting your token in the app settings (`hf_token`) may speed up the download.
+On first boot of the app, the [LLM model](#conversation) must be downloaded (about 4GB). If you have a Hugging Face account, putting your token in the app settings (`hf_token`) may speed up the download.
 
 ## Conversation
 
 An LLM [conversation][] agent built on [Gemma 4][gemma4] is used to recognize [intents][] from voice commands.
 
-The Gemma 4 LLM is run on the CPU using [llama.cpp][] using a [quantized version][] of the [official model][]. Changing the quantization level (like Q5 to Q8) will change the accuracy, speed, and RAM usage of the agent.
+The Gemma 4 LLM is run on the CPU using [llama.cpp][] and a [quantized version][] of the [official model][]. Changing the quantization level, such as from Q5 to Q8, will change the accuracy, speed, and RAM usage of the agent.
 
 The default model is a 5-bit (Q5) version:
 
 - repo: `bartowski/google_gemma-4-E2B-it-GGUF`
 - model: `google_gemma-4-E2B-it-Q5_K_M.gguf`
 
-If you'd like to try the larger official model, use these settings:
+If you'd like to try the higher-precision official Q8 quantization, use these settings:
 
 - repo: `ggml-org/gemma-4-E2B-it-GGUF`
 - model: `gemma-4-E2B-it-Q8_0.gguf`
@@ -96,7 +96,7 @@ Gemma 4 can recognize and run multiple voice commands, such as "turn off the lig
 
 ### State caching
 
-In order to keep the LLM speed reasonable, the agent caches the LLM state's whenever the tools change. If you have `include_names_in_tools` enabled (the default), this will require rebuilding the cached state whenver you modify your [exposed entities][] and restart the app.
+To keep the LLM speed reasonable, the agent caches the LLM state whenever the tools change. If you have `include_names_in_tools` enabled, which is the default, the cached state must be rebuilt whenever you modify your [exposed entities][] and restart the app.
 
 Rebuilding the cached state can take several minutes.
 
@@ -106,8 +106,7 @@ Rebuilding the cached state can take several minutes.
 [gemma4]: https://deepmind.google/models/gemma/gemma-4/
 [intents]: https://developers.home-assistant.io/docs/intent_builtin/
 [llama.cpp]: https://github.com/ggml-org/llama.cpp
-[quantized]: https://en.wikipedia.org/wiki/Large_language_model#Quantization
-[quantization version]: https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF
+[quantized version]: https://huggingface.co/bartowski/google_gemma-4-E2B-it-GGUF
 [official model]: https://huggingface.co/ggml-org/gemma-4-E2B-it-GGUF
 [tools]: https://developers.openai.com/api/docs/guides/function-calling
 [exposed entities]: https://www.home-assistant.io/voice_control/voice_remote_expose_devices/

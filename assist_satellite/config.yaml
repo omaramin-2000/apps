@@ -34,6 +34,7 @@ options:
   peripheral_volume_step: %(default)s
   disable_peripheral_api: false  
   debug_logging: false
+  enable_colored_debug: false
   mute_sound: "/usr/src/sounds/mute_switch_on.flac"
   unmute_sound: "/usr/src/sounds/mute_switch_off.flac"
   preferences_file: "/share/assist_satellite/preferences.json"

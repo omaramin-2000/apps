@@ -11,6 +11,11 @@ if bashio::config.true 'debug_logging'; then
     extra_args+=('--debug')
 fi
 
+# Colored Debug
+if bashio::config.true 'enable_colored_debug'; then
+    extra_args+=('--enable-colored-debug')
+fi
+
 # Thinking sound (processing sound played while assistant thinks)
 if bashio::config.true 'enable_thinking_sound'; then
     extra_args+=('--enable-thinking-sound')
@@ -23,6 +28,7 @@ if [[ -n "${name}" ]]; then
     extra_args+=('--name' "${name}")
 fi
 
+# Audio configuration
 declare audio_input_device
 audio_input_device="$(bashio::config 'audio_input_device')"
 if [[ -n "${audio_input_device}" ]]; then

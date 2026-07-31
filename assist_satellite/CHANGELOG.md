@@ -2,12 +2,12 @@
 
 # 1.1.14
 
-- Update to linux-voice-assistant [1.1.14(https://github.com/OHF-Voice/linux-voice-assistant/releases/tag/v1.1.14)
+- Update to linux-voice-assistant [1.1.14](https://github.com/OHF-Voice/linux-voice-assistant/releases/tag/v1.1.14)
 - Add audio input and output device settings
 
 # 1.1.13
 
-- Update to linux-voice-assistant [1.1.13(https://github.com/OHF-Voice/linux-voice-assistant/releases/tag/v1.1.13)
+- Update to linux-voice-assistant [1.1.13](https://github.com/OHF-Voice/linux-voice-assistant/releases/tag/v1.1.13)
 - Enable leds&buttons control via peripheral websocket api [#266](https://github.com/OHF-Voice/linux-voice-assistant/pull/266)
 
 ## 1.1.12

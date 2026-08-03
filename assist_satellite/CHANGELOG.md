@@ -1,5 +1,9 @@
 # Changelog
 
+# 1.1.15
+
+- Update to linux-voice-assistant [1.1.15](https://github.com/OHF-Voice/linux-voice-assistant/releases/tag/v1.1.15)
+
 # 1.1.14
 
 - Update to linux-voice-assistant [1.1.14](https://github.com/OHF-Voice/linux-voice-assistant/releases/tag/v1.1.14)

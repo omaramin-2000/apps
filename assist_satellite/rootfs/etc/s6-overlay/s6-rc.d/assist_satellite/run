@@ -11,6 +11,11 @@ if bashio::config.true 'debug_logging'; then
     extra_args+=('--debug')
 fi
 
+# Colored Debug
+if bashio::config.true 'enable_colored_debug'; then
+    extra_args+=('--enable-colored-debug')
+fi
+
 # Thinking sound (processing sound played while assistant thinks)
 if bashio::config.true 'enable_thinking_sound'; then
     extra_args+=('--enable-thinking-sound')
@@ -23,6 +28,19 @@ if [[ -n "${name}" ]]; then
     extra_args+=('--name' "${name}")
 fi
 
+# Audio configuration
+declare audio_input_device
+audio_input_device="$(bashio::config 'audio_input_device')"
+if [[ -n "${audio_input_device}" ]]; then
+    extra_args+=('--audio-input-device' "${audio_input_device}")
+fi
+
+declare audio_output_device
+audio_output_device="$(bashio::config 'audio_output_device')"
+if [[ -n "${audio_output_device}" ]]; then
+    extra_args+=('--audio-output-device' "${audio_output_device}")
+fi
+
 declare auto_gain_control
 auto_gain_control="$(bashio::config 'mic_auto_gain')"
 if [[ -n "${auto_gain_control}" ]]; then
@@ -33,6 +51,31 @@ noise_suppression="$(bashio::config 'mic_noise_suppression')"
 if [[ -n "${noise_suppression}" ]]; then
     extra_args+=('--mic-noise-suppression' "${noise_suppression}")
 fi
+
+# Peripheral api configuration
+declare peripheral_host
+peripheral_host="$(bashio::config 'peripheral_host')"
+if [[ -n "${peripheral_host}" ]]; then
+    extra_args+=(`--peripheral-host` "${peripheral_host}")
+fi
+
+declare peripheral_port
+peripheral_port="$(bashio::config 'peripheral_port')"
+if [[ -n "${peripheral_port}" ]]; then
+    extra_args+=(`--peripheral-port` "${peripheral_port}")
+fi
+
+declare peripheral_volume_step
+peripheral_volume_step="$(bashio::config 'peripheral_volume_step')"
+if [[ -n "${peripheral_volume_step}" ]]; then
+    extra_args+=(`--peripheral-volume-step` "${peripheral_volume_step}")
+fi
+
+## Disable peripheral api
+if bashio::config.true 'disable_peripheral_api'; then
+    extra_args+=('--disable-peripheral-api')
+fi
+
 exec python3 -m linux_voice_assistant \
     --port "$(bashio::config 'port')" \
     --wake-model "$(bashio::config 'wake_word')" \

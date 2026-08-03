@@ -1,5 +1,5 @@
 ---
-version: 1.1.12
+version: 1.1.15
 slug: assist_satellite
 name: Assist Satellite
 description: Turn HA host into a voice assistant with a connected microphone and speaker
@@ -16,6 +16,8 @@ map:
 options:
   name: ""
   port: 6053
+  audio_input_device: ""
+  audio_output_device: ""  
   wake_word: "okay_nabu"
   stop_word: "stop"
   refractory_seconds: 2.0
@@ -27,7 +29,12 @@ options:
   mic_volume: 1.0
   mic_noise_suppression: 0
   mic_auto_gain: 0
+  peripheral_host: 0.0.0.0
+  peripheral_port: 6055
+  peripheral_volume_step: %(default)s
+  disable_peripheral_api: false  
   debug_logging: false
+  enable_colored_debug: false
   mute_sound: "/usr/src/sounds/mute_switch_on.flac"
   unmute_sound: "/usr/src/sounds/mute_switch_off.flac"
   preferences_file: "/share/assist_satellite/preferences.json"
@@ -35,6 +42,8 @@ options:
 schema:
   name: str?
   port: int
+  audio_input_device: str?
+  audio_output_device: str?  
   wake_word: str
   stop_word: str
   refractory_seconds: float
@@ -46,6 +55,10 @@ schema:
   mic_volume: float
   mic_noise_suppression: "int(0,4)"
   mic_auto_gain: "int(0,31)"
+  peripheral_host: int
+  peripheral_port: int
+  peripheral_volume_step: str
+  disable_peripheral_api: bool  
   debug_logging: bool
   mute_sound: str
   unmute_sound: str

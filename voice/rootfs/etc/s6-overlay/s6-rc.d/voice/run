@@ -3,7 +3,7 @@
 # ==============================================================================
 # Start voice service
 # ==============================================================================
-cd /usr/src
+cd /usr/src || bashio::exit.nok 'Cannot enter /usr/src'
 
 flags=()
 
@@ -16,7 +16,8 @@ if bashio::config.true 'include_names_in_tools'; then
 fi
 
 export HF_HOME=/data/cache
-export HF_TOKEN="$(bashio::config 'hf_token')"
+HF_TOKEN="$(bashio::config 'hf_token')"
+export HF_TOKEN
 
 exec python3 app.py \
     --uri 'tcp://0.0.0.0:10500' \
@@ -31,4 +32,4 @@ exec python3 app.py \
     --resolver-en-model "$(bashio::config 'resolver_en_model')" \
     --resolver-multilingual-model "$(bashio::config 'resolver_multilingual_model')" \
     --tool-call-cache-size "$(bashio::config 'tool_call_cache_size')" \
-    ${flags[@]}
+    "${flags[@]}"

@@ -13,7 +13,7 @@ fi
 
 # Colored Debug
 if bashio::config.true 'enable_colored_debug'; then
-    extra_args+=('--enable-colored-debug')
+    extra_args+=('--colored-debug')
 fi
 
 # Thinking sound (processing sound played while assistant thinks)
@@ -56,19 +56,19 @@ fi
 declare peripheral_host
 peripheral_host="$(bashio::config 'peripheral_host')"
 if [[ -n "${peripheral_host}" ]]; then
-    extra_args+=(`--peripheral-host` "${peripheral_host}")
+    extra_args+=('--peripheral-host' "${peripheral_host}")
 fi
 
 declare peripheral_port
 peripheral_port="$(bashio::config 'peripheral_port')"
 if [[ -n "${peripheral_port}" ]]; then
-    extra_args+=(`--peripheral-port` "${peripheral_port}")
+    extra_args+=('--peripheral-port' "${peripheral_port}")
 fi
 
 declare peripheral_volume_step
 peripheral_volume_step="$(bashio::config 'peripheral_volume_step')"
 if [[ -n "${peripheral_volume_step}" ]]; then
-    extra_args+=(`--peripheral-volume-step` "${peripheral_volume_step}")
+    extra_args+=('--peripheral-volume-step' "${peripheral_volume_step}")
 fi
 
 ## Disable peripheral api

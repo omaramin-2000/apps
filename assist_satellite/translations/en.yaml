@@ -69,3 +69,52 @@ configuration:
     name: Microphone auto gain
     description: >-
       Level of automatic gain control to apply to the microphone input (0-31, default: 0).
+  wakeup_sound:
+    name: Wake sound
+    description: >-
+      Path to a custom sound file to play when the wake word is detected. The
+      default is included with linux voice assistant.
+  mute_sound:
+    name: Mute sound
+    description: >-
+      Path to a custom sound file to play when the microphone is muted. The
+      default is included with linux voice assistant.
+  unmute_sound:
+    name: Unmute sound
+    description: >-
+      Path to a custom sound file to play when the microphone is unmuted. The
+      default is included with linux voice assistant.
+  preferences_file:
+    name: Preferences file
+    description: >-
+      Path to the JSON file used to persist runtime preferences, such as
+      volume, across restarts.
+  download_dir:
+    name: Download directory
+    description: >-
+      Directory to store custom wake word models downloaded from Home
+      Assistant.
+  peripheral_host:
+    name: Peripheral API host
+    description: >-
+      Bind address for the peripheral WebSocket API, used to control external
+      LED and button hardware (default: 0.0.0.0).
+  peripheral_port:
+    name: Peripheral API port
+    description: >-
+      TCP port the peripheral WebSocket API listens on (default: 6055).
+  peripheral_volume_step:
+    name: Peripheral volume step
+    description: >-
+      Volume change applied per peripheral button press, between 0.0 and 1.0
+      (default: 0.05).
+  disable_peripheral_api:
+    name: Disable peripheral API
+    description: >-
+      Turn off the peripheral WebSocket API entirely. Enable this if you do not
+      use external LED or button hardware.
+  enable_colored_debug:
+    name: Colored debug logging
+    description: >-
+      Colorize debug log output by severity. Enabling this also turns on debug
+      logging.

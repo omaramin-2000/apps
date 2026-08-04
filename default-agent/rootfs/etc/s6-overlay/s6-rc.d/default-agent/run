@@ -14,7 +14,7 @@ if bashio::config.true 'dev_intents'; then
         git clone --depth 1 --branch main "${repo_url}" "${target_dir}"
     else
         echo 'Syncing development intents'
-        cd "${target_dir}"
+        cd "${target_dir}" || bashio::exit.nok "Cannot enter ${target_dir}"
         git fetch origin main --depth 1
         git reset --hard origin/main
     fi
@@ -32,4 +32,4 @@ exec python3 -m default_agent \
     --hass-token "${SUPERVISOR_TOKEN}" \
     --hass-api 'http://supervisor/core/api' \
     --custom-sentences '/share/default-agent/custom_sentences' \
-    ${flags[@]}
+    "${flags[@]}"

@@ -12,7 +12,7 @@ from tool_mapping import HomeGeometry
 BASE_DIR = Path(__file__).parent
 APP_NAME = "Script Agent"
 APP_SLUG = "script-agent"
-APP_VERSION = "1.9.0"
+APP_VERSION = "1.1.0"
 
 if TYPE_CHECKING:
     from gemma4_recognizer import Gemma4Recognizer

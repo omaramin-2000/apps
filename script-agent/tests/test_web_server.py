@@ -5,6 +5,11 @@ from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
 from const import AppState
+from gemma4_recognizer import (
+    DEFAULT_SYSTEM_PROMPT,
+    DEFAULT_USER_PROMPT,
+    validate_prompts,
+)
 from hass_api import HomeAssistantInfo, SatelliteInfo, Tool
 from models import Entity
 from overrides import AREA, ENTITY, FLOOR, NameOverrides, Overrides, load
@@ -33,6 +38,9 @@ class _Recognizer:
         self.error = error
         self.reload_calls = []
         self.max_token_calls = []
+        self.prompt_calls = []
+        self.system_prompt = DEFAULT_SYSTEM_PROMPT
+        self.user_prompt = DEFAULT_USER_PROMPT
         self.max_tokens = 128
         self.n_ctx = None
         self.ready = True
@@ -53,6 +61,15 @@ class _Recognizer:
             raise self.error
         self.max_tokens = max_tokens
 
+    def set_prompts(self, system_prompt, user_prompt):
+        self.prompt_calls.append((system_prompt, user_prompt))
+        if self.error:
+            raise self.error
+        # The real recognizer validates and normalizes before it commits.
+        self.system_prompt, self.user_prompt = validate_prompts(
+            system_prompt, user_prompt
+        )
+
     def describe(self):
         return {
             "repo_id": self.repo_id,
@@ -63,6 +80,8 @@ class _Recognizer:
             "temperature": 0.0,
             "flash_attn": self.flash_attn,
             "draft_model": None,
+            "system_prompt": self.system_prompt,
+            "user_prompt": self.user_prompt,
         }
 
     def get_tool_calls(self, _text, _language):
@@ -488,6 +507,83 @@ class WebPageTests(unittest.TestCase):
         self.assertEqual([256, 128], self.state.recognizer.max_token_calls)
         self.assertEqual(128, self.state.recognizer.max_tokens)
         self.assertIsNone(self.state.overrides.max_tokens)
+
+    def test_settings_page_shows_the_prompts_and_their_placeholders(self):
+        response = self.client.get("/settings")
+
+        self.assertEqual(200, response.status_code)
+        self.assertIn(b"Sentence: &#34;{text}&#34;", response.data)
+        self.assertIn(b"<code>{weekday}</code>", response.data)
+        self.assertIn(b"Using the built-in defaults.", response.data)
+
+    def test_prompts_are_applied_and_persisted(self):
+        response = self.client.post(
+            "/settings/prompts",
+            json={
+                "system_prompt": "Only call one tool.\r\n",
+                "user_prompt": '"{text}" on {weekday}',
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertTrue(response.get_json()["customized"])
+        self.assertEqual("Only call one tool.", self.state.recognizer.system_prompt)
+        self.assertEqual(
+            "Only call one tool.", load(self.state.overrides_path).system_prompt
+        )
+        self.assertEqual(
+            '"{text}" on {weekday}', load(self.state.overrides_path).user_prompt
+        )
+
+    def test_default_prompts_are_not_recorded_as_overrides(self):
+        self.state.overrides.system_prompt = "Only call one tool."
+
+        response = self.client.post(
+            "/settings/prompts",
+            json={
+                "system_prompt": DEFAULT_SYSTEM_PROMPT,
+                "user_prompt": DEFAULT_USER_PROMPT,
+            },
+        )
+
+        self.assertEqual(200, response.status_code)
+        self.assertFalse(response.get_json()["customized"])
+        self.assertIsNone(self.state.overrides.system_prompt)
+        self.assertIsNone(load(self.state.overrides_path).system_prompt)
+
+    def test_prompt_without_the_sentence_is_rejected(self):
+        response = self.client.post(
+            "/settings/prompts",
+            json={
+                "system_prompt": DEFAULT_SYSTEM_PROMPT,
+                "user_prompt": "Language: {language}",
+            },
+        )
+
+        self.assertEqual(400, response.status_code)
+        self.assertIn("{text}", response.get_json()["error"])
+        self.assertEqual([], self.state.recognizer.prompt_calls)
+
+    def test_prompts_roll_back_when_persistence_fails(self):
+        with patch("web_server.overrides.save", side_effect=OSError("disk full")):
+            response = self.client.post(
+                "/settings/prompts",
+                json={
+                    "system_prompt": "Only call one tool.",
+                    "user_prompt": DEFAULT_USER_PROMPT,
+                },
+            )
+
+        self.assertEqual(500, response.status_code)
+        self.assertEqual(
+            [
+                ("Only call one tool.", DEFAULT_USER_PROMPT),
+                (DEFAULT_SYSTEM_PROMPT, DEFAULT_USER_PROMPT),
+            ],
+            self.state.recognizer.prompt_calls,
+        )
+        self.assertEqual(DEFAULT_SYSTEM_PROMPT, self.state.recognizer.system_prompt)
+        self.assertIsNone(self.state.overrides.system_prompt)
 
     def test_field_details_are_available_as_json_for_dialog(self):
         response = self.client.get(

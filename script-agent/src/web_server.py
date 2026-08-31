@@ -6,18 +6,30 @@ import secrets
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 from flask import Flask, Response, jsonify, render_template, request, url_for
+from flask.typing import ResponseReturnValue
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import benchmark
 import overrides
 from benchmark import Fixture
 from const import AppState
+from gemma4_recognizer import (
+    DEFAULT_SYSTEM_PROMPT,
+    DEFAULT_USER_PROMPT,
+    PROMPT_PLACEHOLDERS,
+    normalize_prompt,
+    validate_prompts,
+)
 from hass_api import HomeAssistantInfo, SatelliteInfo, Tool
 from overrides import AREA, ENTITY, FLOOR, NAME_KINDS, NameOverrides, ScriptOverrides
 from tool_mapping import map_tool_call, required_fields
+
+if TYPE_CHECKING:
+    # WSGI types live in typeshed only, so they cannot be imported at runtime.
+    from _typeshed.wsgi import StartResponse, WSGIApplication, WSGIEnvironment
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -215,11 +227,11 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         return token
 
     @flask_app.context_processor
-    def inject_url_for():
+    def inject_url_for() -> Dict[str, Any]:
         return dict(url_for=url_for)  # pylint: disable=use-dict-literal
 
     @flask_app.route("/", methods=["GET"])
-    def index():
+    def index() -> ResponseReturnValue:
         """Show every script, split by whether the model can call it."""
         scripts = [
             _describe_script(
@@ -240,7 +252,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         )
 
     @flask_app.route("/test", methods=["GET"])
-    def test_page():
+    def test_page() -> ResponseReturnValue:
         """Show the interactive sentence tester."""
         satellites = sorted(
             (
@@ -255,7 +267,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         return render_template("test.html", satellites=satellites)
 
     @flask_app.route("/settings", methods=["GET"])
-    def settings_page():
+    def settings_page() -> ResponseReturnValue:
         """Show runtime model information and editable recognition settings."""
         model = state.recognizer.describe()
         return render_template(
@@ -270,10 +282,94 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
             can_save=state.overrides_path is not None,
             min_max_tokens=MIN_MAX_TOKENS,
             max_max_tokens=MAX_MAX_TOKENS,
+            system_prompt=normalize_prompt(state.recognizer.system_prompt),
+            user_prompt=normalize_prompt(state.recognizer.user_prompt),
+            default_system_prompt=normalize_prompt(DEFAULT_SYSTEM_PROMPT),
+            default_user_prompt=normalize_prompt(DEFAULT_USER_PROMPT),
+            prompts_customized=(state.overrides.system_prompt is not None)
+            or (state.overrides.user_prompt is not None),
+            placeholders=sorted(PROMPT_PLACEHOLDERS.items()),
+        )
+
+    @flask_app.route("/settings/prompts", methods=["POST"])
+    def settings_prompts_apply() -> ResponseReturnValue:
+        """Apply and persist the system and user prompts."""
+        if state.overrides_path is None:
+            return jsonify({"error": "No settings file is configured"}), 503
+        if not state.recognizer.ready:
+            return jsonify({"error": "Model is still loading"}), 503
+
+        body = request.get_json(silent=True) or {}
+        system_prompt = body.get("system_prompt")
+        user_prompt = body.get("user_prompt")
+        if not isinstance(system_prompt, str) or not isinstance(user_prompt, str):
+            return jsonify({"error": "Both prompts are required"}), 400
+
+        try:
+            system_prompt, user_prompt = validate_prompts(system_prompt, user_prompt)
+        except ValueError as err:
+            return jsonify({"error": str(err)}), 400
+
+        if not state.reload_lock.acquire(blocking=False):
+            return jsonify({"error": "Already applying a change"}), 409
+
+        old_system_prompt = state.recognizer.system_prompt
+        old_user_prompt = state.recognizer.user_prompt
+        candidate_overrides = copy.deepcopy(state.overrides)
+        # A prompt that matches the default is not recorded, so the app keeps
+        # following the default if a later version improves it.
+        candidate_overrides.system_prompt = (
+            None
+            if system_prompt == normalize_prompt(DEFAULT_SYSTEM_PROMPT)
+            else system_prompt
+        )
+        candidate_overrides.user_prompt = (
+            None
+            if user_prompt == normalize_prompt(DEFAULT_USER_PROMPT)
+            else user_prompt
+        )
+
+        state.model_rebuilding.set()
+        try:
+            future = state.llama_executor.submit(
+                state.recognizer.set_prompts, system_prompt, user_prompt
+            )
+            future.result()
+            try:
+                overrides.save(state.overrides_path, candidate_overrides)
+            except Exception:
+                # Keep the persisted and effective prompts aligned if writing fails.
+                rollback = state.llama_executor.submit(
+                    state.recognizer.set_prompts, old_system_prompt, old_user_prompt
+                )
+                rollback.result()
+                raise
+            state.overrides = candidate_overrides
+        except ValueError as err:
+            return jsonify({"error": str(err)}), 400
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.exception("Failed to apply prompts")
+            return jsonify({"error": f"Could not apply prompts: {err}"}), 500
+        finally:
+            state.model_rebuilding.clear()
+            state.reload_lock.release()
+
+        return jsonify(
+            {
+                "system_prompt": state.recognizer.system_prompt,
+                "user_prompt": state.recognizer.user_prompt,
+                "customized": (candidate_overrides.system_prompt is not None)
+                or (candidate_overrides.user_prompt is not None),
+                "n_ctx": (
+                    state.recognizer.llm.n_ctx()
+                    if state.recognizer.llm is not None
+                    else None
+                ),
+            }
         )
 
     @flask_app.route("/settings", methods=["POST"])
-    def settings_apply():
+    def settings_apply() -> ResponseReturnValue:
         """Apply and persist the maximum generation length."""
         if state.overrides_path is None:
             return jsonify({"error": "No settings file is configured"}), 503
@@ -341,7 +437,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         """
         assert state.loop is not None, "No event loop"
 
-        async def fetch():
+        async def fetch() -> Tuple[HomeAssistantInfo, List[Tool]]:
             hass_info = await state.hass.get_home_info()
             all_tools = await state.hass.get_script_tools(
                 hass_info, candidate_overrides.names
@@ -360,7 +456,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         return hass_info, all_tools
 
     @flask_app.route("/reload", methods=["POST"])
-    def reload_from_hass():
+    def reload_from_hass() -> ResponseReturnValue:
         """Re-read Home Assistant, then rebuild the tools and model prefix.
 
         The app otherwise reads Home Assistant once, at start, so this is how a
@@ -401,7 +497,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         return {str(name) for name in names} & known
 
     @flask_app.route("/overrides/estimate", methods=["POST"])
-    def overrides_estimate():
+    def overrides_estimate() -> ResponseReturnValue:
         """Report what a prospective tool set would cost, before applying it."""
         body = request.get_json(silent=True) or {}
         names = _requested_names(body)
@@ -423,7 +519,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         )
 
     @flask_app.route("/overrides", methods=["POST"])
-    def overrides_apply():
+    def overrides_apply() -> ResponseReturnValue:
         """Change which scripts are targeted, then rebuild the model prefix.
 
         Recognition is unavailable while the prefix is rebuilt, which can take
@@ -484,13 +580,13 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
             state.reload_lock.release()
 
     @flask_app.route("/tools.json", methods=["GET"])
-    def tools_json():
+    def tools_json() -> ResponseReturnValue:
         """The tools as given to the model (OpenAI function spec), for debugging."""
         tools = [tool.tool for tool in state.tools.values()]
         return Response(json.dumps(tools, indent=2), mimetype="application/json")
 
     @flask_app.route("/test", methods=["POST"])
-    def test():
+    def test() -> ResponseReturnValue:
         """Recognize one sentence and report what it would run, without running it."""
         body = request.get_json(silent=True) or {}
         text = str(body.get("text") or "").strip()
@@ -575,7 +671,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         )
 
     @flask_app.route("/test/run", methods=["POST"])
-    def test_run():
+    def test_run() -> ResponseReturnValue:
         """Run one resolved test result exactly once."""
         body = request.get_json(silent=True) or {}
         run_id = body.get("run_id")
@@ -613,7 +709,9 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         names = state.overrides.names
         rows: Dict[str, List[Dict[str, Any]]] = {}
 
-        def row(kind: str, target_id: str, default_names: List[str], extra: str = ""):
+        def row(
+            kind: str, target_id: str, default_names: List[str], extra: str = ""
+        ) -> Dict[str, Any]:
             current = names.names_for(kind, target_id, default_names)
             return {
                 "id": target_id,
@@ -639,7 +737,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         return rows
 
     @flask_app.route("/names", methods=["GET"])
-    def names_page():
+    def names_page() -> ResponseReturnValue:
         """Edit what the model may call each entity, area, and floor."""
         return render_template(
             "names.html",
@@ -660,7 +758,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         return [name for name in target.names if name] if target else []
 
     @flask_app.route("/names/field", methods=["GET"])
-    def names_field_page():
+    def names_field_page() -> ResponseReturnValue:
         """Edit names for one script's field only.
 
         Reached from that field on the Scripts page, so the list is already the
@@ -725,7 +823,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         )
 
     @flask_app.route("/names/field", methods=["POST"])
-    def names_field_apply():
+    def names_field_apply() -> ResponseReturnValue:
         """Replace one script field's name overrides, then rebuild."""
         if not state.recognizer.ready:
             return jsonify({"error": "Model is still loading"}), 503
@@ -769,7 +867,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         return jsonify({"num_overridden": len(scoped)})
 
     @flask_app.route("/names", methods=["POST"])
-    def names_apply():
+    def names_apply() -> ResponseReturnValue:
         """Replace name overrides, then rebuild the tools and model prefix.
 
         Names feed the enums, which are built while reading Home Assistant, so
@@ -821,22 +919,22 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         )
 
     @flask_app.route("/health")
-    def health():
+    def health() -> ResponseReturnValue:
         # Deliberately "ok" while the model is still loading: the first boot can
         # spend many minutes downloading it, and the container should not be
         # restarted for being slow. Use /status to see readiness.
         return {"status": "ok"}, 200
 
     @flask_app.route("/status")
-    def status():
+    def status() -> ResponseReturnValue:
         return {"model_loaded": state.recognizer.ready}, 200
 
     @flask_app.route("/benchmark", methods=["GET"])
-    def benchmark_page():
+    def benchmark_page() -> ResponseReturnValue:
         return render_template("benchmark.html", max_passes=MAX_PASSES)
 
     @flask_app.route("/benchmark/run", methods=["POST"])
-    def benchmark_run():
+    def benchmark_run() -> ResponseReturnValue:
         if fixture is None:
             return {"error": fixture_error or "No benchmark fixture"}, 500
         if not state.recognizer.ready:
@@ -863,7 +961,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
 
 
 def run_web_server(flask_app: Flask, host: str, port: int) -> threading.Thread:
-    def run_flask():
+    def run_flask() -> None:
         logging.getLogger("werkzeug").setLevel(logging.ERROR)
         flask_app.run(host=host, port=port, use_reloader=False)
 
@@ -875,10 +973,12 @@ def run_web_server(flask_app: Flask, host: str, port: int) -> threading.Thread:
 class IngressPrefixMiddleware:
     """Ingress fix for Home Assistant app web UI."""
 
-    def __init__(self, app):
+    def __init__(self, app: "WSGIApplication") -> None:
         self.app = app
 
-    def __call__(self, environ, start_response):
+    def __call__(
+        self, environ: "WSGIEnvironment", start_response: "StartResponse"
+    ) -> Iterable[bytes]:
         ingress_path = environ.get("HTTP_X_INGRESS_PATH", "")
         if ingress_path:
             environ["SCRIPT_NAME"] = ingress_path

@@ -1,4 +1,5 @@
 import argparse
+import re
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -23,6 +24,16 @@ class ReleaseMetadataTests(unittest.TestCase):
 
     def test_config_version_matches_runtime_version(self):
         self.assertEqual(APP_VERSION, self.config["version"])
+
+    def test_changelog_documents_the_current_version(self):
+        # The version is written in three places: config.yaml, const.py, and the
+        # changelog's newest heading. The first two are checked above; this is
+        # the copy that is easy to leave behind when the number changes.
+        changelog = (self.project_dir / "CHANGELOG.md").read_text("utf-8")
+        versions = re.findall(r"^##\s+(\S+)", changelog, flags=re.MULTILINE)
+
+        self.assertTrue(versions, "CHANGELOG.md has no version headings")
+        self.assertEqual(APP_VERSION, versions[0])
 
     def test_flash_attention_is_enabled_by_default(self):
         self.assertIs(True, self.config["options"]["flash_attention"])

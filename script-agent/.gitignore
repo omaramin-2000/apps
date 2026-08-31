@@ -1,8 +1,5 @@
 __pycache__/
 
 /local/
-
-# Local dev scripts (contain a Home Assistant token / host addresses).
-run.sh
-sync.sh
-sync-green.sh
+/*.sh
+.python-version

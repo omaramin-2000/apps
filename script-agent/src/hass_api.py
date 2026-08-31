@@ -3,8 +3,7 @@
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse, urlunparse
 
 import aiohttp
@@ -87,13 +86,30 @@ def _apply_satellite_registry_info(
         )
 
 
+def _domain_set(domains: Any) -> Optional[Set[str]]:
+    """One or more domain names as a set, or None when there is no restriction."""
+    if not domains:
+        return None
+
+    if isinstance(domains, str):
+        return {domains}
+
+    if isinstance(domains, list):
+        return {domain for domain in domains if isinstance(domain, str)} or None
+
+    return None
+
+
 def _get_entity_filter_domains(
     entity_selector: Dict[str, Any],
 ) -> Optional[Set[str]]:
-    """Get domains from either Home Assistant entity filter representation."""
+    """Get domains from any Home Assistant entity filter representation."""
     entity_filters = entity_selector.get("filter")
     if not entity_filters:
-        return None
+        # The shorthand that predates `filter` (``entity: {domain: calendar}``)
+        # is still valid, and still what most blueprints are written with.
+        # Without this, such a field is offered every exposed entity.
+        return _domain_set(entity_selector.get("domain"))
 
     if isinstance(entity_filters, dict):
         entity_filters = [entity_filters]
@@ -102,14 +118,12 @@ def _get_entity_filter_domains(
     for entity_filter in entity_filters:
         if not isinstance(entity_filter, dict):
             return None
-        filter_domains = entity_filter.get("domain")
-        if not filter_domains:
+        filter_domains = _domain_set(entity_filter.get("domain"))
+        if filter_domains is None:
             # This alternative does not restrict the domain, so neither can we.
             return None
-        if isinstance(filter_domains, str):
-            domains.add(filter_domains)
-        else:
-            domains.update(filter_domains)
+
+        domains.update(filter_domains)
 
     return domains or None
 
@@ -400,7 +414,9 @@ class HomeAssistant:
 
         return satellite_info
 
-    async def _get_blueprint_descriptions(self, websocket, next_id) -> Dict[str, str]:
+    async def _get_blueprint_descriptions(
+        self, websocket: aiohttp.ClientWebSocketResponse, next_id: Callable[[], int]
+    ) -> Dict[str, str]:
         """Blueprint path -> description, for every script blueprint."""
         await websocket.send_json(
             {"id": next_id(), "type": "blueprint/list", "domain": "script"}
@@ -420,7 +436,10 @@ class HomeAssistant:
         return descriptions
 
     async def _get_script_configs(
-        self, websocket, next_id, script_ids: Set[str]
+        self,
+        websocket: aiohttp.ClientWebSocketResponse,
+        next_id: Callable[[], int],
+        script_ids: Set[str],
     ) -> Dict[str, Dict[str, Any]]:
         """Get the full configuration exposed by each script entity."""
         configs: Dict[str, Dict[str, Any]] = {}
@@ -501,7 +520,6 @@ class HomeAssistant:
         what Home Assistant calls things.
         """
         tools: List[Tool] = []
-        now = datetime.now()
         names = name_overrides or NameOverrides()
 
         # Every area and floor, with the names Home Assistant gives it.
@@ -724,16 +742,31 @@ class HomeAssistant:
                                 field_prop.update(_select_property(selector_config))
                             elif "date" in selector:
                                 field_prop["format"] = "date"
-                                field_description += f"\nDate in YYYY-MM-DD format. The current year is {now.year}"
+                                field_description += (
+                                    "\nDate in YYYY-MM-DD format. Work out the date "
+                                    "from the current date, which is given with the "
+                                    "sentence."
+                                )
                             elif "time" in selector:
                                 field_prop["format"] = "time"
                                 field_description += "\nTime in HH:MM:SS format, or HH:MM if seconds are not needed"
                             elif "datetime" in selector:
                                 field_prop["format"] = "date-time"
-                                field_description += f"\nISO 8601 datetime. Include timezone offset when known. The current year is {now.year}"
+                                field_description += (
+                                    "\nISO 8601 datetime in YYYY-MM-DDTHH:MM:SS format. "
+                                    "Work out the date from the current date, which is "
+                                    "given with the sentence. Never name a weekday or "
+                                    "use a word like tomorrow."
+                                )
                             elif "duration" in selector:
                                 field_prop["format"] = "duration"
-                                field_description += "\nDuration in HH:MM:SS format, or HH:MM if seconds are not needed"
+                                # Always all three parts: Home Assistant reads a
+                                # two-part duration as MM:SS, so "01:00" would
+                                # quietly mean one minute rather than one hour.
+                                field_description += (
+                                    "\nDuration in HH:MM:SS format, including the "
+                                    "hours even when they are zero"
+                                )
                             elif "color_rgb" in selector:
                                 field_prop["type"] = "array"
                                 field_prop["items"] = {

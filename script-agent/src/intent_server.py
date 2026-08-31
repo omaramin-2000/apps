@@ -71,8 +71,8 @@ class ScriptAgentEventHandler(AsyncEventHandler):
     def __init__(
         self,
         state: AppState,
-        *args,
-        **kwargs,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         """Initialize event handler."""
         super().__init__(*args, **kwargs)

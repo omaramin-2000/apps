@@ -230,7 +230,7 @@ async def main() -> None:
     # Handle graceful termination
     stop_event = asyncio.Event()
 
-    def request_stop():
+    def request_stop() -> None:
         stop_event.set()
 
     for sig in (signal.SIGTERM, signal.SIGINT):

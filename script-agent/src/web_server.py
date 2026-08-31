@@ -6,9 +6,10 @@ import secrets
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 from flask import Flask, Response, jsonify, render_template, request, url_for
+from flask.typing import ResponseReturnValue
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import benchmark
@@ -25,6 +26,10 @@ from gemma4_recognizer import (
 from hass_api import HomeAssistantInfo, SatelliteInfo, Tool
 from overrides import AREA, ENTITY, FLOOR, NAME_KINDS, NameOverrides, ScriptOverrides
 from tool_mapping import map_tool_call, required_fields
+
+if TYPE_CHECKING:
+    # WSGI types live in typeshed only, so they cannot be imported at runtime.
+    from _typeshed.wsgi import StartResponse, WSGIApplication, WSGIEnvironment
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -222,11 +227,11 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         return token
 
     @flask_app.context_processor
-    def inject_url_for():
+    def inject_url_for() -> Dict[str, Any]:
         return dict(url_for=url_for)  # pylint: disable=use-dict-literal
 
     @flask_app.route("/", methods=["GET"])
-    def index():
+    def index() -> ResponseReturnValue:
         """Show every script, split by whether the model can call it."""
         scripts = [
             _describe_script(
@@ -247,7 +252,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         )
 
     @flask_app.route("/test", methods=["GET"])
-    def test_page():
+    def test_page() -> ResponseReturnValue:
         """Show the interactive sentence tester."""
         satellites = sorted(
             (
@@ -262,7 +267,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         return render_template("test.html", satellites=satellites)
 
     @flask_app.route("/settings", methods=["GET"])
-    def settings_page():
+    def settings_page() -> ResponseReturnValue:
         """Show runtime model information and editable recognition settings."""
         model = state.recognizer.describe()
         return render_template(
@@ -287,7 +292,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         )
 
     @flask_app.route("/settings/prompts", methods=["POST"])
-    def settings_prompts_apply():
+    def settings_prompts_apply() -> ResponseReturnValue:
         """Apply and persist the system and user prompts."""
         if state.overrides_path is None:
             return jsonify({"error": "No settings file is configured"}), 503
@@ -364,7 +369,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         )
 
     @flask_app.route("/settings", methods=["POST"])
-    def settings_apply():
+    def settings_apply() -> ResponseReturnValue:
         """Apply and persist the maximum generation length."""
         if state.overrides_path is None:
             return jsonify({"error": "No settings file is configured"}), 503
@@ -432,7 +437,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         """
         assert state.loop is not None, "No event loop"
 
-        async def fetch():
+        async def fetch() -> Tuple[HomeAssistantInfo, List[Tool]]:
             hass_info = await state.hass.get_home_info()
             all_tools = await state.hass.get_script_tools(
                 hass_info, candidate_overrides.names
@@ -451,7 +456,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         return hass_info, all_tools
 
     @flask_app.route("/reload", methods=["POST"])
-    def reload_from_hass():
+    def reload_from_hass() -> ResponseReturnValue:
         """Re-read Home Assistant, then rebuild the tools and model prefix.
 
         The app otherwise reads Home Assistant once, at start, so this is how a
@@ -492,7 +497,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         return {str(name) for name in names} & known
 
     @flask_app.route("/overrides/estimate", methods=["POST"])
-    def overrides_estimate():
+    def overrides_estimate() -> ResponseReturnValue:
         """Report what a prospective tool set would cost, before applying it."""
         body = request.get_json(silent=True) or {}
         names = _requested_names(body)
@@ -514,7 +519,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         )
 
     @flask_app.route("/overrides", methods=["POST"])
-    def overrides_apply():
+    def overrides_apply() -> ResponseReturnValue:
         """Change which scripts are targeted, then rebuild the model prefix.
 
         Recognition is unavailable while the prefix is rebuilt, which can take
@@ -575,13 +580,13 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
             state.reload_lock.release()
 
     @flask_app.route("/tools.json", methods=["GET"])
-    def tools_json():
+    def tools_json() -> ResponseReturnValue:
         """The tools as given to the model (OpenAI function spec), for debugging."""
         tools = [tool.tool for tool in state.tools.values()]
         return Response(json.dumps(tools, indent=2), mimetype="application/json")
 
     @flask_app.route("/test", methods=["POST"])
-    def test():
+    def test() -> ResponseReturnValue:
         """Recognize one sentence and report what it would run, without running it."""
         body = request.get_json(silent=True) or {}
         text = str(body.get("text") or "").strip()
@@ -666,7 +671,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         )
 
     @flask_app.route("/test/run", methods=["POST"])
-    def test_run():
+    def test_run() -> ResponseReturnValue:
         """Run one resolved test result exactly once."""
         body = request.get_json(silent=True) or {}
         run_id = body.get("run_id")
@@ -704,7 +709,9 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         names = state.overrides.names
         rows: Dict[str, List[Dict[str, Any]]] = {}
 
-        def row(kind: str, target_id: str, default_names: List[str], extra: str = ""):
+        def row(
+            kind: str, target_id: str, default_names: List[str], extra: str = ""
+        ) -> Dict[str, Any]:
             current = names.names_for(kind, target_id, default_names)
             return {
                 "id": target_id,
@@ -730,7 +737,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         return rows
 
     @flask_app.route("/names", methods=["GET"])
-    def names_page():
+    def names_page() -> ResponseReturnValue:
         """Edit what the model may call each entity, area, and floor."""
         return render_template(
             "names.html",
@@ -751,7 +758,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         return [name for name in target.names if name] if target else []
 
     @flask_app.route("/names/field", methods=["GET"])
-    def names_field_page():
+    def names_field_page() -> ResponseReturnValue:
         """Edit names for one script's field only.
 
         Reached from that field on the Scripts page, so the list is already the
@@ -816,7 +823,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         )
 
     @flask_app.route("/names/field", methods=["POST"])
-    def names_field_apply():
+    def names_field_apply() -> ResponseReturnValue:
         """Replace one script field's name overrides, then rebuild."""
         if not state.recognizer.ready:
             return jsonify({"error": "Model is still loading"}), 503
@@ -860,7 +867,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         return jsonify({"num_overridden": len(scoped)})
 
     @flask_app.route("/names", methods=["POST"])
-    def names_apply():
+    def names_apply() -> ResponseReturnValue:
         """Replace name overrides, then rebuild the tools and model prefix.
 
         Names feed the enums, which are built while reading Home Assistant, so
@@ -912,22 +919,22 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
         )
 
     @flask_app.route("/health")
-    def health():
+    def health() -> ResponseReturnValue:
         # Deliberately "ok" while the model is still loading: the first boot can
         # spend many minutes downloading it, and the container should not be
         # restarted for being slow. Use /status to see readiness.
         return {"status": "ok"}, 200
 
     @flask_app.route("/status")
-    def status():
+    def status() -> ResponseReturnValue:
         return {"model_loaded": state.recognizer.ready}, 200
 
     @flask_app.route("/benchmark", methods=["GET"])
-    def benchmark_page():
+    def benchmark_page() -> ResponseReturnValue:
         return render_template("benchmark.html", max_passes=MAX_PASSES)
 
     @flask_app.route("/benchmark/run", methods=["POST"])
-    def benchmark_run():
+    def benchmark_run() -> ResponseReturnValue:
         if fixture is None:
             return {"error": fixture_error or "No benchmark fixture"}, 500
         if not state.recognizer.ready:
@@ -954,7 +961,7 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
 
 
 def run_web_server(flask_app: Flask, host: str, port: int) -> threading.Thread:
-    def run_flask():
+    def run_flask() -> None:
         logging.getLogger("werkzeug").setLevel(logging.ERROR)
         flask_app.run(host=host, port=port, use_reloader=False)
 
@@ -966,10 +973,12 @@ def run_web_server(flask_app: Flask, host: str, port: int) -> threading.Thread:
 class IngressPrefixMiddleware:
     """Ingress fix for Home Assistant app web UI."""
 
-    def __init__(self, app):
+    def __init__(self, app: "WSGIApplication") -> None:
         self.app = app
 
-    def __call__(self, environ, start_response):
+    def __call__(
+        self, environ: "WSGIEnvironment", start_response: "StartResponse"
+    ) -> Iterable[bytes]:
         ingress_path = environ.get("HTTP_X_INGRESS_PATH", "")
         if ingress_path:
             environ["SCRIPT_NAME"] = ingress_path

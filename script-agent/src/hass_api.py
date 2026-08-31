@@ -3,7 +3,7 @@
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse, urlunparse
 
 import aiohttp
@@ -414,7 +414,9 @@ class HomeAssistant:
 
         return satellite_info
 
-    async def _get_blueprint_descriptions(self, websocket, next_id) -> Dict[str, str]:
+    async def _get_blueprint_descriptions(
+        self, websocket: aiohttp.ClientWebSocketResponse, next_id: Callable[[], int]
+    ) -> Dict[str, str]:
         """Blueprint path -> description, for every script blueprint."""
         await websocket.send_json(
             {"id": next_id(), "type": "blueprint/list", "domain": "script"}
@@ -434,7 +436,10 @@ class HomeAssistant:
         return descriptions
 
     async def _get_script_configs(
-        self, websocket, next_id, script_ids: Set[str]
+        self,
+        websocket: aiohttp.ClientWebSocketResponse,
+        next_id: Callable[[], int],
+        script_ids: Set[str],
     ) -> Dict[str, Dict[str, Any]]:
         """Get the full configuration exposed by each script entity."""
         configs: Dict[str, Dict[str, Any]] = {}

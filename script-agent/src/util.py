@@ -4,18 +4,18 @@ from typing import Any
 
 
 class LRUCache:
-    def __init__(self, maxsize: int):
+    def __init__(self, maxsize: int) -> None:
         self.maxsize = maxsize
         self.data: OrderedDict[str, Any] = OrderedDict()
 
-    def get(self, key: str, default=None):
+    def get(self, key: str, default: Any = None) -> Any:
         if key not in self.data:
             return default
 
         self.data.move_to_end(key)
         return self.data[key]
 
-    def set(self, key: str, value: Any):
+    def set(self, key: str, value: Any) -> None:
         if key in self.data:
             self.data.move_to_end(key)
 

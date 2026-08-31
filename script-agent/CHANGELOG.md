@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.9.0
+## 1.1.0
 
 - Add a "Create calendar event" blueprint
 - Restrict entity fields written with the `domain` shorthand

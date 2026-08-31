@@ -1,5 +1,5 @@
 ---
-version: 1.9.0
+version: 1.1.0
 slug: script-agent
 name: Script Agent
 description: Run Home Assistant scripts by voice with a local language model

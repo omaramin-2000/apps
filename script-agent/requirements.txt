@@ -108,7 +108,7 @@ typing-extensions==4.15.0
     #   llama-cpp-python
 werkzeug==3.1.8
     # via flask
-wyoming==1.9.0
+wyoming==1.10.2
     # via -r requirements.in
 yarl==1.24.2
     # via aiohttp

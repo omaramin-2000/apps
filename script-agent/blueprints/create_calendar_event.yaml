@@ -32,7 +32,7 @@ fields:
 
   summary:
     name: Summary
-    description: Title of the event, such as "dentist appointment"
+    description: Title of the event
     required: true
     selector:
       text:

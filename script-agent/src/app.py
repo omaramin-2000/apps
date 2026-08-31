@@ -13,7 +13,13 @@ from wyoming.server import AsyncServer
 
 import overrides
 from const import BASE_DIR, AppState
-from gemma4_recognizer import DEFAULT_MAX_TOKENS, Gemma4Recognizer
+from gemma4_recognizer import (
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_SYSTEM_PROMPT,
+    DEFAULT_USER_PROMPT,
+    Gemma4Recognizer,
+    validate_prompts,
+)
 from hass_api import HomeAssistant
 from intent_server import ScriptAgentEventHandler
 from web_server import make_web_server, run_web_server
@@ -145,6 +151,26 @@ async def main() -> None:
             "the web UI. Agent will not function."
         )
 
+    # Prompts edited in the web UI replace the defaults. They are validated here
+    # rather than trusted: a prompt saved by an older version, or hand-edited in
+    # the overrides file, must not leave the app unable to recognize anything.
+    system_prompt = DEFAULT_SYSTEM_PROMPT
+    user_prompt = DEFAULT_USER_PROMPT
+    if (all_overrides.system_prompt is not None) or (
+        all_overrides.user_prompt is not None
+    ):
+        try:
+            system_prompt, user_prompt = validate_prompts(
+                all_overrides.system_prompt or system_prompt,
+                all_overrides.user_prompt or user_prompt,
+            )
+        except ValueError as err:
+            _LOGGER.warning("Using the default prompts: %s", err)
+            all_overrides.system_prompt = None
+            all_overrides.user_prompt = None
+            system_prompt = DEFAULT_SYSTEM_PROMPT
+            user_prompt = DEFAULT_USER_PROMPT
+
     _LOGGER.info(
         "Loading Gemma 4 (repo=%s, filename=%s)", args.hf_repo, args.hf_filename
     )
@@ -152,6 +178,8 @@ async def main() -> None:
         repo_id=args.hf_repo.strip(),
         filename=args.hf_filename.strip(),
         state_path=args.llama_state,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
         cache_size=args.tool_call_cache_size,
         n_ctx=args.n_ctx if args.n_ctx > 0 else None,
         n_ctx_overhead=args.n_ctx_overhead,

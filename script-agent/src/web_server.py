@@ -15,6 +15,13 @@ import benchmark
 import overrides
 from benchmark import Fixture
 from const import AppState
+from gemma4_recognizer import (
+    DEFAULT_SYSTEM_PROMPT,
+    DEFAULT_USER_PROMPT,
+    PROMPT_PLACEHOLDERS,
+    normalize_prompt,
+    validate_prompts,
+)
 from hass_api import HomeAssistantInfo, SatelliteInfo, Tool
 from overrides import AREA, ENTITY, FLOOR, NAME_KINDS, NameOverrides, ScriptOverrides
 from tool_mapping import map_tool_call, required_fields
@@ -270,6 +277,90 @@ def make_web_server(state: AppState, benchmark_fixture_path: Union[str, Path]) -
             can_save=state.overrides_path is not None,
             min_max_tokens=MIN_MAX_TOKENS,
             max_max_tokens=MAX_MAX_TOKENS,
+            system_prompt=normalize_prompt(state.recognizer.system_prompt),
+            user_prompt=normalize_prompt(state.recognizer.user_prompt),
+            default_system_prompt=normalize_prompt(DEFAULT_SYSTEM_PROMPT),
+            default_user_prompt=normalize_prompt(DEFAULT_USER_PROMPT),
+            prompts_customized=(state.overrides.system_prompt is not None)
+            or (state.overrides.user_prompt is not None),
+            placeholders=sorted(PROMPT_PLACEHOLDERS.items()),
+        )
+
+    @flask_app.route("/settings/prompts", methods=["POST"])
+    def settings_prompts_apply():
+        """Apply and persist the system and user prompts."""
+        if state.overrides_path is None:
+            return jsonify({"error": "No settings file is configured"}), 503
+        if not state.recognizer.ready:
+            return jsonify({"error": "Model is still loading"}), 503
+
+        body = request.get_json(silent=True) or {}
+        system_prompt = body.get("system_prompt")
+        user_prompt = body.get("user_prompt")
+        if not isinstance(system_prompt, str) or not isinstance(user_prompt, str):
+            return jsonify({"error": "Both prompts are required"}), 400
+
+        try:
+            system_prompt, user_prompt = validate_prompts(system_prompt, user_prompt)
+        except ValueError as err:
+            return jsonify({"error": str(err)}), 400
+
+        if not state.reload_lock.acquire(blocking=False):
+            return jsonify({"error": "Already applying a change"}), 409
+
+        old_system_prompt = state.recognizer.system_prompt
+        old_user_prompt = state.recognizer.user_prompt
+        candidate_overrides = copy.deepcopy(state.overrides)
+        # A prompt that matches the default is not recorded, so the app keeps
+        # following the default if a later version improves it.
+        candidate_overrides.system_prompt = (
+            None
+            if system_prompt == normalize_prompt(DEFAULT_SYSTEM_PROMPT)
+            else system_prompt
+        )
+        candidate_overrides.user_prompt = (
+            None
+            if user_prompt == normalize_prompt(DEFAULT_USER_PROMPT)
+            else user_prompt
+        )
+
+        state.model_rebuilding.set()
+        try:
+            future = state.llama_executor.submit(
+                state.recognizer.set_prompts, system_prompt, user_prompt
+            )
+            future.result()
+            try:
+                overrides.save(state.overrides_path, candidate_overrides)
+            except Exception:
+                # Keep the persisted and effective prompts aligned if writing fails.
+                rollback = state.llama_executor.submit(
+                    state.recognizer.set_prompts, old_system_prompt, old_user_prompt
+                )
+                rollback.result()
+                raise
+            state.overrides = candidate_overrides
+        except ValueError as err:
+            return jsonify({"error": str(err)}), 400
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.exception("Failed to apply prompts")
+            return jsonify({"error": f"Could not apply prompts: {err}"}), 500
+        finally:
+            state.model_rebuilding.clear()
+            state.reload_lock.release()
+
+        return jsonify(
+            {
+                "system_prompt": state.recognizer.system_prompt,
+                "user_prompt": state.recognizer.user_prompt,
+                "customized": (candidate_overrides.system_prompt is not None)
+                or (candidate_overrides.user_prompt is not None),
+                "n_ctx": (
+                    state.recognizer.llm.n_ctx()
+                    if state.recognizer.llm is not None
+                    else None
+                ),
+            }
         )
 
     @flask_app.route("/settings", methods=["POST"])

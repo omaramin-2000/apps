@@ -8,6 +8,7 @@ import pickle
 import re
 import time
 from ast import literal_eval
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union, cast
 
@@ -29,11 +30,33 @@ DEFAULT_MAX_TOKENS = 128
 
 DEFAULT_REPO = "ggml-org/gemma-4-E2B-it-GGUF"
 DEFAULT_FILENAME = "gemma-4-E2B-it-Q8_0.gguf"
-DEFAULT_SYSTEM_PROMPT = """
-Call tools for the following sentence.
-If no tools are called, say you don't understand in the following language.
-"""
-DEFAULT_USER_PROMPT = 'Sentence: "{text}"\nLanguage: "{language}"'
+# Both defaults are written already normalized (see ``normalize_prompt``), so
+# restoring them in the web UI cannot leave the saved and running prompts one
+# rebuild apart.
+DEFAULT_SYSTEM_PROMPT = (
+    "Call tools for the sentence below.\n"
+    "If no tools are called, reply in the language below that you don't understand."
+)
+DEFAULT_USER_PROMPT = (
+    'Sentence: "{text}"\nLanguage: "{language}"\nToday is {weekday}, {date}'
+)
+
+# The most a prompt may be, so an edit cannot quietly swallow the context.
+MAX_PROMPT_CHARS = 2000
+
+# What ``{...}`` in the user prompt may refer to. Anything the model needs in
+# order to resolve "Saturday" or "tomorrow" belongs here rather than in the
+# system prompt: the system prompt is the cached prefix, so a date in it would
+# be rebuilt (minutes, on a Raspberry Pi) every time the day changed.
+PROMPT_PLACEHOLDERS = {
+    "text": "the sentence to recognize",
+    "language": "the requested response language",
+    "date": "the current date, as YYYY-MM-DD",
+    "time": "the current time, as HH:MM",
+    "datetime": "the current date and time, ISO 8601",
+    "weekday": "the current day of the week",
+}
+_PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,12 +114,13 @@ class Gemma4Recognizer:
     def required_n_ctx(self, tools: List[Dict[str, Any]]) -> int:
         """Context size needed for the fixed prompt plus one utterance.
 
-        Assumes chars / 3 is a conservative upper bound on tokens; the user
-        prompt and templating are covered by the overhead. Rounded up to a
+        Assumes chars / 3 is a conservative upper bound on tokens; the sentence
+        itself and the templating are covered by the overhead. Rounded up to a
         multiple of 64.
         """
         with io.StringIO() as prompt_file:
             print(self.system_prompt, file=prompt_file)
+            print(self.user_prompt, file=prompt_file)
             json.dump(_sort_tools(tools), prompt_file)
             num_chars = len(prompt_file.getvalue())
 
@@ -264,6 +288,78 @@ class Gemma4Recognizer:
         self.ready = True
         _LOGGER.info("Now using %s tool(s)", len(new_tools))
 
+    def set_prompts(self, system_prompt: str, user_prompt: str) -> None:
+        """Change the prompts, rebuilding the cached prefix when it is affected.
+
+        The system prompt is the cached prefix, so changing it costs a full
+        rebuild -- the same wait as changing the tool set. The user prompt is
+        evaluated per utterance, so changing it is free unless it no longer fits
+        in the context.
+
+        Must be called on the same single thread that serves recognition.
+        """
+        assert self.llm, "Not loaded"
+        assert self.tools is not None, "Not loaded"
+
+        system_prompt, user_prompt = validate_prompts(system_prompt, user_prompt)
+        system_changed = normalize_prompt(self.system_prompt) != system_prompt
+        user_changed = normalize_prompt(self.user_prompt) != user_prompt
+        if not (system_changed or user_changed):
+            return
+
+        old_system_prompt = self.system_prompt
+        old_user_prompt = self.user_prompt
+
+        def restore_prompts() -> None:
+            self.system_prompt = old_system_prompt
+            self.system_message = {"role": "system", "content": old_system_prompt}
+            self.user_prompt = old_user_prompt
+
+        self.system_prompt = system_prompt
+        self.system_message = {"role": "system", "content": system_prompt}
+        self.user_prompt = user_prompt
+
+        needed_n_ctx = self.required_n_ctx(self.tools)
+        if (self.n_ctx is not None) and (needed_n_ctx > self.llm.n_ctx()):
+            restore_prompts()
+            raise ValueError(
+                f"These prompts need at least {needed_n_ctx} context tokens, but "
+                f"the fixed context is {self.llm.n_ctx()}"
+            )
+
+        grow_context = (self.n_ctx is None) and (needed_n_ctx > self.llm.n_ctx())
+        if not (system_changed or grow_context):
+            # Only the per-utterance prompt moved, and it still fits.
+            if self.cache is not None:
+                self.cache.clear()
+            _LOGGER.info("User prompt updated")
+            return
+
+        old_llm = self.llm
+        live_state = old_llm.save_state()
+        self.ready = False
+        try:
+            if grow_context:
+                _LOGGER.info(
+                    "Growing context from %s to %s token(s) for the new prompts",
+                    self.llm.n_ctx(),
+                    needed_n_ctx,
+                )
+                self._create_llm(needed_n_ctx)
+
+            self._restore_or_build_state()
+        except Exception:
+            restore_prompts()
+            self.llm = old_llm
+            self.llm.load_state(live_state)
+            self.ready = True
+            raise
+
+        if self.cache is not None:
+            self.cache.clear()
+        self.ready = True
+        _LOGGER.info("Prompts updated")
+
     def set_max_tokens(self, max_tokens: int) -> None:
         """Change the generation limit, growing an automatic context if needed.
 
@@ -321,7 +417,14 @@ class Gemma4Recognizer:
         assert self.llm, "Not loaded"
 
         text = text.strip()
-        cache_key = f"{language}: {text}"
+        user_content = format_prompt(
+            self.user_prompt, prompt_values(text, language, datetime.now())
+        )
+
+        # Keyed on the rendered prompt, not the sentence: a prompt that carries
+        # the date must not answer tomorrow's "add it for Saturday" with the
+        # datetime it worked out today.
+        cache_key = f"{language}: {user_content}"
         if self.cache is not None:
             cached_response = self.cache.get(cache_key)
             if cached_response is not None:
@@ -334,12 +437,7 @@ class Gemma4Recognizer:
             self.llm.create_chat_completion(
                 messages=[
                     self.system_message,  # type: ignore
-                    {
-                        "role": "user",
-                        "content": self.user_prompt.format(
-                            text=text, language=language
-                        ),
-                    },
+                    {"role": "user", "content": user_content},
                 ],
                 tools=self.tools,  # type: ignore
                 temperature=self.temperature,
@@ -390,6 +488,8 @@ class Gemma4Recognizer:
             "temperature": self.temperature,
             "flash_attn": self.flash_attn,
             "draft_model": draft_model,
+            "system_prompt": self.system_prompt,
+            "user_prompt": self.user_prompt,
         }
 
     def run_sentences(
@@ -447,8 +547,9 @@ class Gemma4Recognizer:
                                 self.system_message,  # type: ignore
                                 {
                                     "role": "user",
-                                    "content": self.user_prompt.format(
-                                        text=text, language=language
+                                    "content": format_prompt(
+                                        self.user_prompt,
+                                        prompt_values(text, language, datetime.now()),
                                     ),
                                 },
                             ],
@@ -498,6 +599,82 @@ class Gemma4Recognizer:
 
 
 # -----------------------------------------------------------------------------
+
+
+def normalize_prompt(prompt: str) -> str:
+    """A prompt with insignificant whitespace removed.
+
+    Prompts are edited in a browser textarea, which brings back line endings and
+    trailing spaces of its own. Comparing normalized prompts keeps a form
+    round-trip from counting as a change, which would rebuild the prompt cache.
+    """
+    lines = prompt.replace("\r\n", "\n").replace("\r", "\n").strip().split("\n")
+    return "\n".join(line.rstrip() for line in lines)
+
+
+def unknown_placeholders(prompt: str) -> List[str]:
+    """``{...}`` names in a prompt that nothing will ever fill in."""
+    return sorted(
+        {
+            name
+            for name in _PLACEHOLDER_RE.findall(prompt)
+            if name not in PROMPT_PLACEHOLDERS
+        }
+    )
+
+
+def validate_prompts(system_prompt: str, user_prompt: str) -> Tuple[str, str]:
+    """Return both prompts normalized, or raise ValueError saying what is wrong."""
+    system_prompt = normalize_prompt(system_prompt)
+    user_prompt = normalize_prompt(user_prompt)
+
+    for label, prompt in (
+        ("System prompt", system_prompt),
+        ("User prompt", user_prompt),
+    ):
+        if not prompt:
+            raise ValueError(f"{label} cannot be empty")
+        if len(prompt) > MAX_PROMPT_CHARS:
+            raise ValueError(
+                f"{label} cannot be longer than {MAX_PROMPT_CHARS} characters"
+            )
+
+        unknown = unknown_placeholders(prompt)
+        if unknown:
+            raise ValueError(
+                f"{label} uses unknown placeholder(s) "
+                f"{', '.join('{' + name + '}' for name in unknown)}. Available: "
+                f"{', '.join('{' + name + '}' for name in sorted(PROMPT_PLACEHOLDERS))}"
+            )
+
+    # Without the sentence the model is being asked to recognize nothing.
+    if "{text}" not in user_prompt:
+        raise ValueError("User prompt must include {text}")
+
+    return system_prompt, user_prompt
+
+
+def format_prompt(template: str, values: Dict[str, str]) -> str:
+    """Fill in the ``{...}`` placeholders a prompt is allowed to use.
+
+    Deliberately not ``str.format``: prompts are user-editable, and a stray
+    brace must not turn every command into a KeyError.
+    """
+    return _PLACEHOLDER_RE.sub(
+        lambda match: values.get(match.group(1), match.group(0)), template
+    )
+
+
+def prompt_values(text: str, language: str, now: datetime) -> Dict[str, str]:
+    """What the user prompt's placeholders stand for, for one utterance."""
+    return {
+        "text": text,
+        "language": language,
+        "date": now.strftime("%Y-%m-%d"),
+        "time": now.strftime("%H:%M"),
+        "datetime": now.strftime("%Y-%m-%dT%H:%M:%S"),
+        "weekday": now.strftime("%A"),
+    }
 
 
 def _parse_tool_calls(text: str) -> List[Tuple[str, Dict[str, Any]]]:

@@ -241,14 +241,25 @@ class Overrides:
     scripts: ScriptOverrides = field(default_factory=ScriptOverrides)
     names: NameOverrides = field(default_factory=NameOverrides)
     max_tokens: Optional[int] = None
+    # Prompts as edited in the web UI. None means "use the startup default",
+    # which is how a reset is recorded.
+    system_prompt: Optional[str] = None
+    user_prompt: Optional[str] = None
 
     def as_dict(self) -> Dict[str, object]:
         data: Dict[str, object] = {
             **self.scripts.as_dict(),
             "names": self.names.as_dict(),
         }
+        settings: Dict[str, object] = {}
         if self.max_tokens is not None:
-            data["settings"] = {"max_tokens": self.max_tokens}
+            settings["max_tokens"] = self.max_tokens
+        if self.system_prompt is not None:
+            settings["system_prompt"] = self.system_prompt
+        if self.user_prompt is not None:
+            settings["user_prompt"] = self.user_prompt
+        if settings:
+            data["settings"] = settings
         return data
 
 
@@ -348,6 +359,7 @@ def load(path: Optional[Path]) -> Overrides:
     )
     settings = data.get("settings") or {}
     max_tokens: Optional[int] = None
+    prompts: Dict[str, Optional[str]] = {"system_prompt": None, "user_prompt": None}
     if isinstance(settings, dict):
         configured_max_tokens = settings.get("max_tokens")
         if (
@@ -363,10 +375,27 @@ def load(path: Optional[Path]) -> Overrides:
                 configured_max_tokens,
             )
 
+        # Only the shape is checked here; what makes a prompt usable is the
+        # recognizer's business, and the app falls back to the default when it
+        # rejects one.
+        for setting_key in prompts:
+            configured_prompt = settings.get(setting_key)
+            if isinstance(configured_prompt, str) and configured_prompt.strip():
+                prompts[setting_key] = configured_prompt
+            elif configured_prompt is not None:
+                _LOGGER.warning(
+                    "Ignoring invalid %s setting in %s: %r",
+                    setting_key,
+                    path,
+                    configured_prompt,
+                )
+
     return Overrides(
         scripts=script_overrides,
         names=name_overrides,
         max_tokens=max_tokens,
+        system_prompt=prompts["system_prompt"],
+        user_prompt=prompts["user_prompt"],
     )
 
 

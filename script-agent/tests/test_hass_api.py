@@ -1,4 +1,7 @@
 import unittest
+from pathlib import Path
+
+import yaml
 
 from hass_api import (
     HomeAssistant,
@@ -89,6 +92,71 @@ class EntityFilterTests(unittest.TestCase):
             _get_entity_filter_domains(
                 {"filter": [{"domain": "light"}, {"device_class": "outlet"}]}
             )
+        )
+
+    def test_shorthand_domain_restricts_domains(self):
+        # `entity: {domain: calendar}` predates `filter` and is still valid, so a
+        # field written that way must not be offered every exposed entity.
+        self.assertEqual(
+            {"calendar"},
+            _get_entity_filter_domains({"domain": "calendar"}),
+        )
+
+    def test_shorthand_domain_list_restricts_domains(self):
+        self.assertEqual(
+            {"light", "switch"},
+            _get_entity_filter_domains({"domain": ["light", "switch"]}),
+        )
+
+    def test_shorthand_without_domain_does_not_restrict_domains(self):
+        self.assertIsNone(_get_entity_filter_domains({"device_class": "outlet"}))
+        self.assertIsNone(_get_entity_filter_domains({}))
+
+    def test_filter_beats_shorthand_domain(self):
+        self.assertEqual(
+            {"calendar"},
+            _get_entity_filter_domains(
+                {"domain": "light", "filter": {"domain": "calendar"}}
+            ),
+        )
+
+
+class BlueprintTests(unittest.TestCase):
+    """The bundled examples are what people copy, so keep them parseable."""
+
+    def _blueprints(self):
+        blueprint_dir = Path(__file__).parent.parent / "blueprints"
+        paths = sorted(blueprint_dir.glob("*.yaml"))
+        self.assertTrue(paths, "No blueprints found")
+        return [(path, yaml.safe_load(path.read_text("utf-8"))) for path in paths]
+
+    def test_entity_fields_declare_a_domain(self):
+        for path, blueprint in self._blueprints():
+            for field_key, field_info in (blueprint.get("fields") or {}).items():
+                selector = field_info.get("selector") or {}
+                if "entity" not in selector:
+                    continue
+
+                with self.subTest(blueprint=path.name, field=field_key):
+                    self.assertIsNotNone(
+                        _get_entity_filter_domains(selector["entity"] or {}),
+                        f"{field_key} is offered every exposed entity",
+                    )
+
+    def test_calendar_event_targets_calendars(self):
+        path = Path(__file__).parent.parent / "blueprints/create_calendar_event.yaml"
+        blueprint = yaml.safe_load(path.read_text("utf-8"))
+        fields = blueprint["fields"]
+
+        self.assertEqual(
+            {"calendar"},
+            _get_entity_filter_domains(fields["calendar"]["selector"]["entity"]),
+        )
+        self.assertEqual({"datetime": None}, fields["start"]["selector"])
+        self.assertEqual({"duration": None}, fields["duration"]["selector"])
+        self.assertTrue(
+            all(fields[key].get("required") for key in fields),
+            "Every field is needed to create an event",
         )
 
 

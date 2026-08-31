@@ -127,11 +127,20 @@ The following field [selectors][] are supported:
 - Boolean
 - Color temperature
 - Date
+    - The current date is given to the model with each command, so "Saturday"
+      and "tomorrow" become real dates
 - Date & time
+    - As above; the model is told to answer with `YYYY-MM-DDTHH:MM:SS`
 - Duration
+    - The model fills this in as `HH:MM:SS`, where Home Assistant's own UI gives
+      a mapping of `days`/`hours`/`minutes`/`seconds`. Write templates that
+      accept both — see the `create_calendar_event` [blueprint][blueprints]
+    - Beware that `as_timedelta` reads a two-part `01:00` as *one minute*, not
+      one hour
 - Entity
     - Uses all [exposed][expose] entity names
-    - Add a [domain filter][] to restrict possible entities
+    - Add a [domain filter][] to restrict possible entities. Both the current
+      `filter` form and the older `domain` shorthand work
 - Floor
     - Uses all available floor names and [aliases][]
 - Number
@@ -229,6 +238,35 @@ generate for one command. The value is saved in `/data/overrides.yaml`, takes
 effect immediately, and grows an automatically sized context when necessary.
 The page also shows the effective model, context size, CPU threads, and flash
 attention setting.
+
+### Prompts
+
+The same page edits the two prompts, also saved in `/data/overrides.yaml`:
+
+- The **system prompt** comes before the tools and is the cached prefix, so
+  changing it rebuilds the prompt cache — the same wait as changing which
+  scripts are targeted.
+- The **user prompt** wraps each command and is built fresh every time, so
+  anything that changes belongs here rather than in the system prompt. It may
+  use these placeholders, of which `{text}` is required:
+
+    - `{text}` — the sentence to recognize
+    - `{language}` — the requested response language
+    - `{date}` — the current date, as `YYYY-MM-DD`
+    - `{time}` — the current time, as `HH:MM`
+    - `{datetime}` — the current date and time, ISO 8601
+    - `{weekday}` — the current day of the week
+
+The default user prompt carries the date, which is how a date or date & time
+field gets an actual date out of "for an hour at 2pm on Saturday". Recognized
+sentences are cached against the finished prompt, so including `{time}` or
+`{datetime}` makes [tool call caching](#tool-call-caching) nearly useless: the
+prompt then changes every minute. A longer user prompt also costs time on every
+command, since it is evaluated per utterance rather than cached.
+
+**Restore defaults** puts both prompts back. Prompts that match the defaults are
+not recorded, so the app keeps following the default if a later version improves
+it.
 
 ### Choosing which scripts are targeted
 

@@ -31,7 +31,7 @@ configuration:
     description: >-
       Minimum seconds between wake word activations to prevent accidental
       double-triggers (default: 2.0).
-  continue_conversation_deyay:
+  continue_conversation_delay:
     name: Continue conversation delay
     description: >-
       Delay seconds before mic opens for continued conversation (default: 0.5).

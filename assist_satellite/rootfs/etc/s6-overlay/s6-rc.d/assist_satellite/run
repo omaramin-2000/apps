@@ -35,6 +35,12 @@ if [[ -n "${audio_input_device}" ]]; then
     extra_args+=('--audio-input-device' "${audio_input_device}")
 fi
 
+declare audio_input_block_size
+audio_input_block_size="$(bashio::config 'audio_input_block_size')"
+if [[ -n "${audio_input_block_size}" ]]; then
+  extra_args+=( "--audio-input-block-size" "$audio_input_block_size" )
+fi
+
 declare audio_output_device
 audio_output_device="$(bashio::config 'audio_output_device')"
 if [[ -n "${audio_output_device}" ]]; then
@@ -89,6 +95,9 @@ exec python3 -m linux_voice_assistant \
     --processing-sound "$(bashio::config 'processing_sound')" \
     --mute-sound "$(bashio::config 'mute_sound')" \
     --unmute-sound "$(bashio::config 'unmute_sound')" \
+    --button-double-press-sound "$(bashio::config 'button_double_press_sound')" \
+    --button-triple-press-sound "$(bashio::config 'button_triple_press_sound')" \
+    --button-long-press-sound "$(bashio::config 'button_long_press_sound')" \
     --preferences-file "$(bashio::config 'preferences_file')" \
     --download-dir "$(bashio::config 'download_dir')" \
     --timer-max-ring-seconds "$(bashio::config 'timer_max_ring_seconds')" \

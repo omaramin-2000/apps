@@ -38,7 +38,7 @@ fi
 declare audio_input_block_size
 audio_input_block_size="$(bashio::config 'audio_input_block_size')"
 if [[ -n "${audio_input_block_size}" ]]; then
-  extra_args+=( "--audio-input-block-size" "$audio_input_block_size" )
+    extra_args+=('--audio-input-block-size' "${audio_input_block_size}")
 fi
 
 declare audio_output_device

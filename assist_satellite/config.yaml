@@ -1,5 +1,5 @@
 ---
-version: 1.1.15
+version: 1.1.16
 slug: assist_satellite
 name: Assist Satellite
 description: Turn HA host into a voice assistant with a connected microphone and speaker
@@ -17,6 +17,7 @@ options:
   name: ""
   port: 6053
   audio_input_device: ""
+  audio_input_block_size: 1024
   audio_output_device: ""  
   wake_word: "okay_nabu"
   stop_word: "stop"
@@ -32,18 +33,23 @@ options:
   mic_auto_gain: 0
   peripheral_host: "0.0.0.0"
   peripheral_port: 6055
+  peripheral_startup_wait: 2.0
   peripheral_volume_step: 0.05
   disable_peripheral_api: false  
   debug_logging: false
   enable_colored_debug: false
   mute_sound: "/usr/src/sounds/mute_switch_on.flac"
   unmute_sound: "/usr/src/sounds/mute_switch_off.flac"
+  button_double_press-sound: "sounds/button_double_press.flac"
+  button_triple_press-sound: "sounds/button_triple_press.flac"
+  button_long_press-sound: "sounds/button_long_press.flac"  
   preferences_file: "/share/assist_satellite/preferences.json"
   download_dir: "/share/assist_satellite/local"
 schema:
   name: str?
   port: int
   audio_input_device: str?
+  audio_input_block_size: int
   audio_output_device: str?  
   wake_word: str
   stop_word: str
@@ -60,11 +66,15 @@ schema:
   peripheral_host: str
   peripheral_port: int
   peripheral_volume_step: "float(0,1)"
+  peripheral_startup_wait: float
   disable_peripheral_api: bool
   debug_logging: bool
   enable_colored_debug: bool
   mute_sound: str
   unmute_sound: str
+  button_double_press-sound: str
+  button_triple_press-sound: str
+  button_long_press-sound: str
   preferences_file: str
   download_dir: str
 audio: true

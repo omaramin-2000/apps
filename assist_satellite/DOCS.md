@@ -50,6 +50,10 @@ this if you run multiple satellites on the same host.
 Soundcard name or index for microphone input. Leave empty to use the system
 default. Enable `debug_logging` to list available devices in the log.
 
+### Option: `audio_input_block_size`
+
+Audio input block size in samples (default: `1024`)
+
 ### Option: `audio_output_device`
 
 mpv audio device name for sound output. Leave empty to use the system default.

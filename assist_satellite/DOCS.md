@@ -17,7 +17,7 @@ following button:
 
 [![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=esphome)
 
-Then, enter the device IP address (`127.0.0.1`, and `localhost` not working with the app yet. See [#24](https://github.com/OHF-Voice/linux-voice-assistant/issues/24#issuecomment-4320725122) with port 6053.
+Then, enter the device IP address (`127.0.0.1`, and `localhost` not working with the app yet. See [#24](https://github.com/OHF-Voice/linux-voice-assistant/issues/24#issuecomment-4320725122) ) with port 6053.
 
 Once connected, the satellite exposes the following controls on its Home
 Assistant device page:

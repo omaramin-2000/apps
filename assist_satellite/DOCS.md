@@ -91,15 +91,15 @@ Sound file played when timer finishes (default: `sounds/timer_finished.flac`).
 
 ### Option: `button_double_press_sound`
 
-Sound played on button double press (default: `sounds/button_double_press.flac`)
+Sound played on button double press (default: `sounds/button_double_press.flac`).
 
 ### Option: `button_triple_press_sound`
 
-Sound played on button triple press (default: `sounds/button_triple_press.flac`)
+Sound played on button triple press (default: `sounds/button_triple_press.flac`).
 
 ### Option: `button_long_press_sound`
 
-Sound played on button long press (default: `sounds/button_long_press.flac`)
+Sound played on button long press (default: `sounds/button_long_press.flac`).
 
 ### Option: `enable_thinking_sound`
 
@@ -136,7 +136,7 @@ Seconds after which the timer stops ringing (default: `900` which is 15 minutes)
 
 ### Option: `mic_volume`
 
-Control microphone volume by fixed value (default: `1.0` which is the maximum)
+Control microphone volume by fixed value (default: `1.0` which is the maximum).
 
 ### Option: `mic_noise_suppression`
 

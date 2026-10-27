@@ -89,15 +89,15 @@ Sound played while assistant is processing (default: `sounds/processing.wav`).
 
 Sound file played when timer finishes (default: `sounds/timer_finished.flac`).
 
-### Option: `button_double_press_sound
+### Option: `button_double_press_sound`
 
 Sound played on button double press (default: `sounds/button_double_press.flac`)
 
-### Option: `button_triple_press_sound
+### Option: `button_triple_press_sound`
 
 Sound played on button triple press (default: `sounds/button_triple_press.flac`)
 
-### Option: `button_long_press_sound
+### Option: `button_long_press_sound`
 
 Sound played on button long press (default: `sounds/button_long_press.flac`)
 
@@ -118,7 +118,7 @@ Bind address for the peripheral WebSocket API (default: `0.0.0.0`).
 
 Port for the peripheral WebSocket API (default: `6055`).
 
-### Option: `peripheral_volume_step
+### Option: `peripheral_volume_step`
 
 Volume change per button press, 0.0–1.0 (default: `%(default)s`).
 
@@ -126,7 +126,7 @@ Volume change per button press, 0.0–1.0 (default: `%(default)s`).
 
 Seconds to wait for peripherals to register entities (default: `2.0`)
 
-### Option: `disable_peripheral_api
+### Option: `disable_peripheral_api`
 
 Disable the peripheral WebSocket API entirely (default: `false`).
 

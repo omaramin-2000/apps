@@ -1,5 +1,14 @@
 # Changelog
 
+# 1.1.18
+
+- Update to linux-voice-assistant [1.1.18](https://github.com/OHF-Voice/linux-voice-assistant/releases/tag/v1.1.18)
+
+# 1.1.17
+
+- Update to linux-voice-assistant [1.1.17](https://github.com/OHF-Voice/linux-voice-assistant/releases/tag/v1.1.17)
+- Add pipeline ended sound [#267](https://github.com/OHF-Voice/linux-voice-assistant/pull/267)
+
 # 1.1.16
 
 - Update to linux-voice-assistant [1.1.16](https://github.com/OHF-Voice/linux-voice-assistant/releases/tag/v1.1.16)
